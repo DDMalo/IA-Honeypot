@@ -12,6 +12,8 @@ cd IA-Honeypot
 python -m venv .venv
 source .venv/bin/activate        # Windows (Git Bash): source .venv/Scripts/activate
 pip install -e ".[dev]"
+pre-commit install
+Pre-commit hooks run automatically before every commit (ruff, mypy, gitleaks and basic file checks). You can run them manually with `pre-commit run --all-files`.
 pytest
 ```
 
