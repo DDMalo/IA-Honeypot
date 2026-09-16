@@ -216,3 +216,24 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Project specific ---
+# Secrets
+.env
+!.env.example
+
+# Malware samples captured by Cowrie: never commit them
+samples/
+downloads/
+
+# Raw honeypot data (may contain personal data such as IPs)
+data/
+*.json.log
+cowrie.json*
+
+# GeoIP databases
+*.mmdb
+
+# Editors
+.vscode/
+.idea/
