@@ -18,9 +18,10 @@ pytest
 Never commit real secrets. Copy `.env.example` to `.env` and fill in your own values; `.env` is ignored by Git.
 
 ## Workflow
+The `main` branch only contains stable releases. All work happens on `develop` through pull requests.
 
 1. Pick an open issue (or open a new one describing the change).
-2. Create a branch from `main` with a descriptive name:
+2. 2. Create a branch from `develop` with a descriptive name:
    - `feat/<short-description>` for new functionality
    - `fix/<short-description>` for bug fixes
    - `docs/<short-description>` for documentation
