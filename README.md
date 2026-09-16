@@ -1,5 +1,5 @@
 # IA-Honeypot
-
+[![CI](https://github.com/DDMalo/IA-Honeypot/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/DDMalo/IA-Honeypot/actions/workflows/ci.yml)
 > SSH/Telnet honeypot with AI-powered attack classification and MITRE ATT&CK mapping.
 
 **Status:** 🚧 Early development (v0.1.0 in progress). See the [project board](../../projects) and [milestones](../../milestones) for the roadmap.
