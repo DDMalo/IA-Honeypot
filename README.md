@@ -50,3 +50,7 @@ pytest
 ## License
 
 [MIT](LICENSE)
+
+## Documentation
+
+- [Homelab setup](docs/homelab-setup.md)
