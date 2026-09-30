@@ -54,3 +54,4 @@ pytest
 ## Documentation
 
 - [Homelab setup](docs/homelab-setup.md)
+- [Sensor setup](docs/sensor-setup.md)
