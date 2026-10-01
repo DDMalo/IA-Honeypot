@@ -53,6 +53,7 @@ pytest
 
 ## Documentation
 
+- [Architecture and threat model](docs/architecture.md)
 - [Homelab setup](docs/homelab-setup.md)
 - [Sensor setup](docs/sensor-setup.md)
 - [Tunnel between sensor and homelab](docs/tunnel.md)
