@@ -61,6 +61,55 @@ from="<homelab-tailnet-ip>",command="rrsync -ro /srv/cowrie/log",no-agent-forwar
 
 `rrsync` ships with rsync and confines the transfer to one directory, read-only. Check it is installed on the sensor first (`command -v rrsync`), apply the change, and **verify a sync still works before closing the session that made the edit** — a wrong forced command locks the key out, which is easy to undo only while another session is open.
 
-### Data handling
+## Database
 
-Everything under `/srv/honeypot/raw` contains attacker IP addresses and stays on this machine: it is never committed, never published, and subject to the retention policy documented with the project's privacy notes. Only aggregates leave the homelab.
+PostgreSQL holds the sessions once they are parsed. It runs in a container on this machine and is **bound to loopback only**: Docker publishes ports by inserting firewall rules ahead of `ufw`, so a port published on `0.0.0.0` would be reachable from the whole network no matter what `ufw` says. Reach it from elsewhere with an SSH port forward over the tunnel.
+
+### Starting it
+
+```bash
+cp ../../.env.example ../../.env     # once, then edit POSTGRES_PASSWORD
+docker compose --env-file ../../.env up -d
+docker compose ps
+```
+
+### Applying migrations
+
+The schema is managed with Alembic, so the database is built by replaying migrations rather than by hand. `alembic.ini` carries no connection string; the URL is read from the environment at runtime, which keeps the password out of the repository.
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+alembic upgrade head
+```
+
+Useful checks:
+
+```bash
+alembic current                  # which revision is applied
+alembic history --verbose        # what exists
+alembic check                    # do the models and the database still agree?
+```
+
+`alembic check` is the one to run after changing a model: it reports any difference between the code and the migrations, which is how a forgotten migration is caught before it reaches `main`.
+
+### Schema at a glance
+
+| Table | Holds |
+|---|---|
+| `sessions` | One row per connection; the primary key is Cowrie's own session id |
+| `login_attempts` | Every credential pair tried, in order |
+| `commands` | Every command typed, flagged when Cowrie could not emulate it |
+| `file_transfers` | URLs attackers tried to fetch, and hashes of anything captured |
+
+Two properties the ingestion worker depends on:
+
+- **Re-ingestion is safe.** The session id is the primary key and child rows are unique per `(session_id, seq)`, so reading the same log twice changes nothing. A failed run is fixed by running it again.
+- **Deleting a session deletes its contents.** Foreign keys cascade, which is what makes the retention policy a single `DELETE` rather than a script.
+
+`sessions` also stores `authenticated` and `command_count`, duplicating what the child tables already say. That is deliberate: nearly every question asked of this data begins by separating the sessions that got in and did something from the overwhelming majority that only guessed passwords, and that filter should not need a join.
+
+## Data handling
+
+Everything under `/srv/honeypot/raw`, and everything in the database, contains attacker IP addresses and stays on this machine: it is never committed, never published, and subject to the retention policy documented with the project's privacy notes. Only aggregates leave the homelab.
