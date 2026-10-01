@@ -32,7 +32,11 @@ target-version = "py312"
 select = ["E", "F", "W", "I", "B", "UP", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # assert is fine in tests
+"tests/**" = [
+    "S101",  # assert is fine in tests
+    "S105",  # fake credentials in fixtures are the point
+    "S106",
+]
 
 [tool.mypy]
 python_version = "3.12"
