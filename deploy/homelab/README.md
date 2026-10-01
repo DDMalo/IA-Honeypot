@@ -110,6 +110,63 @@ Two properties the ingestion worker depends on:
 
 `sessions` also stores `authenticated` and `command_count`, duplicating what the child tables already say. That is deliberate: nearly every question asked of this data begins by separating the sessions that got in and did something from the overwhelming majority that only guessed passwords, and that filter should not need a join.
 
+## Ingestion
+
+Parsing the synced log and loading it into PostgreSQL.
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+python -m honeypot_ai.ingest /srv/honeypot/raw/cowrie.json
+```
+
+The command prints what it did, for example `412 sessions seen, 7 new, 2 updated, 403 unchanged`.
+
+**Running it again is safe and cheap.** The session id is the primary key, and a session is only rewritten when it has actually grown, so a second run over the same file reports everything unchanged and touches nothing. That is what removes the need to remember a position in the file — the usual source of bugs when the log rotates, the sync writes a partial file, or the process dies mid-run.
+
+### On a timer
+
+```bash
+sudo install -m 0644 cowrie-ingest.service /etc/systemd/system/
+sudo install -m 0644 cowrie-ingest.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowrie-ingest.timer
+```
+
+It runs every 20 minutes, offset from the log sync so it reads a file that has just been updated.
+
+```bash
+systemctl list-timers 'cowrie-*'
+journalctl -u cowrie-ingest.service -n 20 --no-pager
+```
+
+### Looking at the data
+
+```bash
+docker exec -it honeypot-postgres psql -U honeypot -d honeypot
+```
+
+```sql
+-- How much is in there
+SELECT count(*) FROM sessions;
+
+-- The sessions worth reading: someone got in and ran something
+SELECT session_id, src_ip, command_count, started_at
+FROM sessions WHERE command_count > 0 ORDER BY started_at DESC LIMIT 10;
+
+-- Most-tried credentials
+SELECT username, password, count(*) AS tries
+FROM login_attempts GROUP BY 1, 2 ORDER BY tries DESC LIMIT 20;
+
+-- What attackers actually type once inside
+SELECT input, count(*) FROM commands GROUP BY 1 ORDER BY 2 DESC LIMIT 20;
+
+-- Busiest source networks (this is why src_ip is `inet` and not text)
+SELECT network(set_masklen(src_ip, 24)) AS subnet, count(*)
+FROM sessions GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
+```
+
 ## Data handling
 
 Everything under `/srv/honeypot/raw`, and everything in the database, contains attacker IP addresses and stays on this machine: it is never committed, never published, and subject to the retention policy documented with the project's privacy notes. Only aggregates leave the homelab.
