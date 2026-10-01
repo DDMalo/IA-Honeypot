@@ -1,0 +1,44 @@
+# Cowrie SSH/Telnet honeypot.
+#
+# Port 22 and 23 are exposed to the internet on purpose: this is the trap.
+# Real administrative SSH lives on a different port (see docs/sensor-setup.md),
+# so every connection arriving here is, by definition, unsolicited.
+#
+# The container sits on its own network with egress blocked by a DOCKER-USER
+# rule (see README.md in this directory). Docker bypasses ufw, so host-level
+# egress rules are not enough on their own.
+
+services:
+  cowrie:
+    image: cowrie/cowrie:latest
+    container_name: cowrie
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp
+    ports:
+      - "22:2222"     # SSH emulation
+      - "23:2223"     # Telnet emulation
+    volumes:
+      - ./cowrie.cfg:/cowrie/cowrie-git/etc/cowrie.cfg:ro
+      - /srv/cowrie/log:/cowrie/cowrie-git/var/log/cowrie
+      - /srv/cowrie/downloads:/cowrie/cowrie-git/var/lib/cowrie/downloads
+      - /srv/cowrie/tty:/cowrie/cowrie-git/var/lib/cowrie/tty
+    networks:
+      - honeypot
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  honeypot:
+    name: honeypot
+    ipam:
+      config:
+        - subnet: 172.31.66.0/24

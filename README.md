@@ -1,5 +1,6 @@
 # IA-Honeypot
 
+[![CI](https://github.com/DDMalo/IA-Honeypot/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/DDMalo/IA-Honeypot/actions/workflows/ci.yml)
 > SSH/Telnet honeypot with AI-powered attack classification and MITRE ATT&CK mapping.
 
 **Status:** 🚧 Early development (v0.1.0 in progress). See the [project board](../../projects) and [milestones](../../milestones) for the roadmap.
@@ -36,7 +37,7 @@ Internet ──► [VPS: Cowrie sensor] ──(secure tunnel)──► [Homelab]
 
 ## Security considerations
 
-Running a honeypot involves real risks. This project isolates the sensor on a dedicated VPS, blocks outbound traffic so it cannot be used against third parties, never stores malware samples in the repository, and treats all attacker input as untrusted when it is sent to an LLM (prompt injection). Details will be documented in `docs/`.
+Running a honeypot involves real risks. This project isolates the sensor on a dedicated VPS, blocks outbound traffic so it cannot be used against third parties, never stores malware samples in the repository, and treats all attacker input as untrusted when it is sent to an LLM (prompt injection). See [the architecture document](docs/architecture.md) for the trust boundaries and the full threat model.
 
 ## Development setup
 
@@ -46,6 +47,13 @@ source .venv/bin/activate        # Windows (Git Bash): source .venv/Scripts/acti
 pip install -e ".[dev]"
 pytest
 ```
+
+## Documentation
+
+- [Architecture and threat model](docs/architecture.md)
+- [Homelab setup](docs/homelab-setup.md)
+- [Sensor setup](docs/sensor-setup.md)
+- [Tunnel between sensor and homelab](docs/tunnel.md)
 
 ## License
 
