@@ -1,0 +1,19 @@
+# Runs the sync every 15 minutes.
+#
+# The interval is a trade-off: often enough that the data is never badly stale,
+# rare enough that a sensor outage does not fill the journal with failures.
+# Nothing here is real time — the pipeline analyses sessions after the fact.
+
+[Unit]
+Description=Pull Cowrie logs from the sensor every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+# Spread the start a little so a reboot does not fire everything at once.
+RandomizedDelaySec=60s
+# Catch up after the laptop has been off.
+Persistent=true
+
+[Install]
+WantedBy=timers.target
