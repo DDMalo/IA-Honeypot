@@ -1,0 +1,48 @@
+# Homelab services.
+#
+# Everything here is bound to 127.0.0.1 on purpose. Docker publishes ports by
+# inserting its own firewall rules ahead of ufw, so a port published on
+# 0.0.0.0 is reachable from the whole network regardless of what ufw says.
+# Binding to loopback is what actually keeps these services private; reach them
+# from elsewhere over the tunnel with an SSH port forward.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: honeypot-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-honeypot}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set}
+      POSTGRES_DB: ${POSTGRES_DB:-honeypot}
+      # Collation and encoding are fixed here so the database is reproducible
+      # on any host, rather than inheriting the machine's locale.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-honeypot} -d ${POSTGRES_DB:-honeypot}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # The laptop has 8 GB and will later run a local model as well; Postgres
+    # does not get to assume it owns the machine.
+    shm_size: 256mb
+    command:
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - max_connections=50
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres-data:
+    name: honeypot-postgres-data
