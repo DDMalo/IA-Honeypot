@@ -1,0 +1,15 @@
+# Runs ingestion every 20 minutes, offset from the log sync so it reads a file
+# that has just been updated rather than racing it. Re-reading the same file is
+# harmless, so a missed run costs nothing.
+
+[Unit]
+Description=Ingest Cowrie sessions every 20 minutes
+
+[Timer]
+OnBootSec=10min
+OnUnitActiveSec=20min
+RandomizedDelaySec=120s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

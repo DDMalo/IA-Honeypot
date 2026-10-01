@@ -4,13 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "honeypot-ai"
-version = "0.1.0"
+version = "0.2.0"
 description = "SSH/Telnet honeypot with AI-powered attack classification and MITRE ATT&CK mapping"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2",
+    "sqlalchemy>=2",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
@@ -32,7 +35,11 @@ target-version = "py312"
 select = ["E", "F", "W", "I", "B", "UP", "S"]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/**" = ["S101"]  # assert is fine in tests
+"tests/**" = [
+    "S101",  # assert is fine in tests
+    "S105",  # fake credentials in fixtures are the point
+    "S106",
+]
 
 [tool.mypy]
 python_version = "3.12"

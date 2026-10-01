@@ -1,0 +1,8 @@
+{"eventid":"cowrie.session.connect","timestamp":"2026-09-30T21:40:00Z","session":"ok01","src_ip":"203.0.113.10","protocol":"ssh"}
+{"eventid":"cowrie.login.failed","timestamp":"2026-09-30T21:40:01Z","session":"ok01","src_i
+not json at all
+{"eventid":"cowrie.login.failed","timestamp":"2026-09-30T21:40:02Z"}
+["a","list","is","not","an","event"]
+{"eventid":"","timestamp":"2026-09-30T21:40:03Z","session":"ok01"}
+
+{"eventid":"cowrie.session.closed","timestamp":"2026-09-30T21:40:05Z","session":"ok01","src_ip":"203.0.113.10","duration":5.0}

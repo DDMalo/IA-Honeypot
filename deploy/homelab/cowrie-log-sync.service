@@ -1,0 +1,17 @@
+# Pulls Cowrie's logs from the sensor. Triggered by cowrie-log-sync.timer.
+
+[Unit]
+Description=Pull Cowrie logs from the sensor
+Documentation=https://github.com/DDMalo/IA-Honeypot
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=david
+EnvironmentFile=/etc/default/cowrie-log-sync
+ExecStart=/usr/local/bin/sync-cowrie-logs.sh
+
+# The sensor may be unreachable; that is not a failure worth alerting on.
+SuccessExitStatus=0
+TimeoutStartSec=600

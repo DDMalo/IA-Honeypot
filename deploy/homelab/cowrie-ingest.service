@@ -1,0 +1,15 @@
+# Loads the synced Cowrie log into PostgreSQL. Triggered by cowrie-ingest.timer.
+
+[Unit]
+Description=Ingest Cowrie sessions into PostgreSQL
+Documentation=https://github.com/DDMalo/IA-Honeypot
+After=docker.service cowrie-log-sync.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=david
+WorkingDirectory=/home/david/IA-Honeypot
+EnvironmentFile=/home/david/IA-Honeypot/.env
+ExecStart=/home/david/IA-Honeypot/.venv/bin/python -m honeypot_ai.ingest /srv/honeypot/raw/cowrie.json
+TimeoutStartSec=900
