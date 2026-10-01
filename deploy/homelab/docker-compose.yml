@@ -5,16 +5,21 @@
 # 0.0.0.0 is reachable from the whole network regardless of what ufw says.
 # Binding to loopback is what actually keeps these services private; reach them
 # from elsewhere over the tunnel with an SSH port forward.
+#
+# Credentials come from the repository's .env through `env_file`, which hands
+# them to the container without Compose having to interpolate them. Writing
+# them as ${VARIABLES} instead would force every `docker compose` invocation —
+# including `ps` and `logs` — to be given the same --env-file, which is easy to
+# forget and fails confusingly.
 
 services:
   postgres:
     image: postgres:16-alpine
     container_name: honeypot-postgres
     restart: unless-stopped
+    env_file:
+      - ../../.env
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-honeypot}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is not set}
-      POSTGRES_DB: ${POSTGRES_DB:-honeypot}
       # Collation and encoding are fixed here so the database is reproducible
       # on any host, rather than inheriting the machine's locale.
       POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
@@ -23,7 +28,9 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-honeypot} -d ${POSTGRES_DB:-honeypot}"]
+      # $$ escapes the dollar so Compose leaves it alone: the variable is
+      # resolved inside the container, where env_file has already set it.
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 10s
       timeout: 5s
       retries: 5
