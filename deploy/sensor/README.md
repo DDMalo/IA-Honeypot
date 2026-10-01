@@ -16,12 +16,23 @@ These live outside the repository. **Nothing under `/srv/cowrie` is ever committ
 
 ## First deployment
 
+The container runs as uid/gid 999, so the bind-mounted directories must be owned by that id or Cowrie fails to write its logs and session recordings. Confirm the id rather than assuming it:
+
+```bash
+docker run --rm --entrypoint /cowrie/cowrie-env/bin/python cowrie/cowrie:latest \
+  -c "import os; print(os.getuid(), os.getgid())"
+```
+
+Then:
+
 ```bash
 sudo mkdir -p /srv/cowrie/{log,downloads,tty}
-sudo chown -R 1000:1000 /srv/cowrie      # the image runs as uid 1000
+sudo chown -R 999:999 /srv/cowrie
 docker compose up -d
-docker compose logs --tail 20
+docker compose logs --tail 30
 ```
+
+A `PermissionError` on `var/lib/cowrie/tty/...` in the logs means the ownership above is wrong: the honeypot still answers attackers, but nothing is recorded.
 
 ## Egress containment
 
@@ -36,21 +47,28 @@ sudo netfilter-persistent save
 
 Consequence worth knowing: Cowrie normally *does* fetch the URLs an attacker passes to `wget` or `curl`. With egress blocked the fetch fails, but the attempted URL is still recorded — which is the part that matters for analysis, and it avoids hosting live malware pulled on an attacker's behalf.
 
-Verify:
+Verify from a throwaway container on the same network (the Cowrie image itself is minimal and ships no shell):
 
 ```bash
-docker exec cowrie sh -c 'timeout 5 nc -z 1.1.1.1 443; echo $?'   # expect 124
+docker run --rm --network honeypot alpine \
+  sh -c 'timeout 5 nc -z 1.1.1.1 443; echo "exit: $?"'
 ```
+
+Expect a non-zero exit from the timeout (124, or 143 when `timeout` has to kill the process). A `0` means the connection succeeded and the rules are not in effect — check them with `sudo iptables -L DOCKER-USER -n --line-numbers`.
 
 ## Verifying the honeypot
 
-From a workstation, connect as an attacker would (any password is accepted by the default userdb):
+From a workstation, connect as an attacker would:
 
 ```bash
 ssh root@<sensor-ip>
 ```
 
-A fake shell should appear. Then, on the sensor:
+The host key will have changed if you previously used port 22 for real administration; `ssh-keygen -R <sensor-ip>` clears the stale entry. Host keys are stored per address *and* port, so this does not affect administrative access on the non-standard port.
+
+Cowrie's default userdb accepts any password for `root` **except** `root` and `123456`, which are refused on purpose: the bots that only ever try those are trivial scanners, and turning them away keeps the recorded sessions weighted towards attackers that go on to run commands.
+
+Then, on the sensor:
 
 ```bash
 tail -f /srv/cowrie/log/cowrie.json
@@ -65,6 +83,7 @@ docker compose pull && docker compose up -d   # update
 docker compose restart
 docker compose down
 du -sh /srv/cowrie/*                          # watch disk usage
+wc -l /srv/cowrie/log/cowrie.json             # events captured so far
 ```
 
 Log rotation and shipping to the homelab are handled in the ingestion milestone.
