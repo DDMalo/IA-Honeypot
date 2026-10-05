@@ -256,7 +256,7 @@ Grafana reads the database directly. Everything about it — the connection and 
 
 ### Starting it
 
-Add a Grafana password to `.env` first (`GRAFANA_ADMIN_PASSWORD`), then:
+Add a Grafana password to `.env` first (`GF_SECURITY_ADMIN_PASSWORD`, next to `GF_SECURITY_ADMIN_USER`), then:
 
 ```bash
 cd ~/IA-Honeypot/deploy/homelab
