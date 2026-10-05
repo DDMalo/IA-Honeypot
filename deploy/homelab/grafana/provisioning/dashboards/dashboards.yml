@@ -1,0 +1,17 @@
+# Load dashboards from files on disk, so they live in Git like everything else.
+
+apiVersion: 1
+
+providers:
+  - name: honeypot
+    orgId: 1
+    folder: Honeypot
+    type: file
+    disableDeletion: false
+    # Edits made in the UI are written back to disk, so a change made while
+    # exploring can be committed instead of being lost on the next restart.
+    allowUiUpdates: true
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false

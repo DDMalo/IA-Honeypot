@@ -1,0 +1,655 @@
+{
+  "uid": "honeypot-overview",
+  "title": "Honeypot overview",
+  "description": "What the honeypot has seen. The time picker above scopes every panel.",
+  "tags": [
+    "honeypot",
+    "security"
+  ],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "5m",
+  "editable": true,
+  "graphTooltip": 1,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "1m",
+      "5m",
+      "15m",
+      "1h"
+    ]
+  },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Sessions",
+      "description": "Connections to the honeypot in the selected range.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "honeypot-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "honeypot-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS value FROM sessions WHERE $__timeFilter(started_at)",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Unique addresses",
+      "description": "Distinct source addresses. Far smaller than the session count: a single bot reconnects constantly.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "honeypot-postgres"
+      },
+      "gridPos": {
+        "x": 6,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "honeypot-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(DISTINCT src_ip) AS value FROM sessions WHERE $__timeFilter(started_at)",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Interactive sessions",
+      "description": "Sessions where an attacker got in and ran at least one command. These are the ones worth reading.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "honeypot-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "honeypot-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(*) AS value FROM sessions WHERE $__timeFilter(started_at) AND command_count > 0",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Countries",
+      "description": "Countries the traffic came from. Where the packets originate, not where the attacker is.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "honeypot-postgres"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "honeypot-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT count(DISTINCT i.country_code) AS value FROM sessions s JOIN ip_intel i ON i.ip = s.src_ip WHERE $__timeFilter(s.started_at)",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "none",
+        "graphMode": "none",
+        "justifyMode": "auto"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "text"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "timeseries",
+      "title": "Sessions over time",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "honeypot-postgres"
+      },
+      "description": "Attack volume. Sustained plateaus are automated scanning; spikes usually mean one actor.",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 7
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "honeypot-postgres"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT $__timeGroupAlias(started_at, $__interval), count(*) AS sessions FROM sessions WHERE $__timeFilter(started_at) GROUP BY 1 ORDER BY 1",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#5794F2"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "pointSize": 8,
+            "spanNulls": false,
+            "gradientMode": "none",
+            "axisLabel": "sessions",
+            "axisBorderShow": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Most-tried usernames",
+      "description": "Service accounts here (hadoop, frappe, lighthouse) mean someone is hunting specific software, not spraying blindly.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "honeypot-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 11,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "honeypot-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT la.username AS \"username\", count(*) AS \"attempts\" FROM login_attempts la JOIN sessions s ON s.session_id = la.session_id WHERE $__timeFilter(s.started_at) AND la.username <> '' GROUP BY 1 ORDER BY 2 DESC LIMIT 12",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "stacking": "none",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0,
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "barWidth": 0.7,
+        "groupWidth": 0.7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#5794F2"
+          },
+          "custom": {
+            "lineWidth": 0,
+            "fillOpacity": 85,
+            "gradientMode": "none",
+            "axisPlacement": "auto",
+            "axisLabel": "attempts"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "barchart",
+      "title": "Most-tried passwords",
+      "description": "Default credentials from botnet wordlists. Compare against public honeypot datasets to sanity-check the collection.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "honeypot-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 11,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "honeypot-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT la.password AS \"password\", count(*) AS \"attempts\" FROM login_attempts la JOIN sessions s ON s.session_id = la.session_id WHERE $__timeFilter(s.started_at) AND la.password <> '' GROUP BY 1 ORDER BY 2 DESC LIMIT 12",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "orientation": "horizontal",
+        "showValue": "auto",
+        "stacking": "none",
+        "xTickLabelRotation": 0,
+        "xTickLabelSpacing": 0,
+        "legend": {
+          "showLegend": false,
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        },
+        "barWidth": 0.7,
+        "groupWidth": 0.7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "fixed",
+            "fixedColor": "#5794F2"
+          },
+          "custom": {
+            "lineWidth": 0,
+            "fillOpacity": 85,
+            "gradientMode": "none",
+            "axisPlacement": "auto",
+            "axisLabel": "attempts"
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "geomap",
+      "title": "Attack origins",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "honeypot-postgres"
+      },
+      "description": "Marker size is session count. Geolocation places the sending machine — for a botnet that is a compromised host, not the operator.",
+      "gridPos": {
+        "x": 0,
+        "y": 19,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "honeypot-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT i.latitude AS latitude, i.longitude AS longitude, count(*) AS sessions FROM sessions s JOIN ip_intel i ON i.ip = s.src_ip WHERE $__timeFilter(s.started_at) AND i.latitude IS NOT NULL GROUP BY 1, 2 ORDER BY 3 DESC",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "view": {
+          "id": "zero",
+          "lat": 20,
+          "lon": 0,
+          "zoom": 1.4
+        },
+        "basemap": {
+          "type": "default",
+          "name": "Basemap",
+          "config": {}
+        },
+        "layers": [
+          {
+            "type": "markers",
+            "name": "Sessions",
+            "location": {
+              "mode": "coords",
+              "latitude": "latitude",
+              "longitude": "longitude"
+            },
+            "config": {
+              "style": {
+                "size": {
+                  "field": "sessions",
+                  "fixed": 5,
+                  "min": 3,
+                  "max": 18
+                },
+                "color": {
+                  "fixed": "#5794F2"
+                },
+                "opacity": 0.5,
+                "symbol": {
+                  "fixed": "img/icons/marker/circle.svg",
+                  "mode": "fixed"
+                }
+              }
+            },
+            "tooltip": true
+          }
+        ],
+        "controls": {
+          "showZoom": true,
+          "mouseWheelZoom": false,
+          "showAttribution": true,
+          "showScale": false
+        },
+        "tooltip": {
+          "mode": "details"
+        }
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Networks behind the traffic",
+      "description": "The autonomous system is a sturdier signal than the country: hosting providers used for attacks stand out, and the interactive column separates noise from intent.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "honeypot-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 19,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "honeypot-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT i.as_org AS \"network\", count(*) AS \"sessions\", count(DISTINCT s.src_ip) AS \"addresses\", count(*) FILTER (WHERE s.command_count > 0) AS \"interactive\" FROM sessions s JOIN ip_intel i ON i.ip = s.src_ip WHERE $__timeFilter(s.started_at) AND i.as_org IS NOT NULL GROUP BY 1 ORDER BY 2 DESC LIMIT 15",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "What attackers run once inside",
+      "description": "The first thing most intruders do is fingerprint the machine. What they run next is what the classifier will have to make sense of.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "honeypot-postgres"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "honeypot-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT c.input AS \"command\", count(*) AS \"times\", count(DISTINCT c.session_id) AS \"sessions\" FROM commands c JOIN sessions s ON s.session_id = c.session_id WHERE $__timeFilter(s.started_at) GROUP BY 1 ORDER BY 2 DESC LIMIT 20",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": []
+      }
+    },
+    {
+      "type": "table",
+      "title": "Recent interactive sessions",
+      "description": "Sessions worth opening by hand. This table is the raw material for the labelled dataset in v0.5.0.",
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "honeypot-postgres"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 28,
+        "w": 12,
+        "h": 9
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-postgresql-datasource",
+            "uid": "honeypot-postgres"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT s.started_at AS \"started\", host(s.src_ip) AS \"address\", i.country_code AS \"country\", s.command_count AS \"commands\", round(s.duration_seconds::numeric, 1) AS \"seconds\" FROM sessions s LEFT JOIN ip_intel i ON i.ip = s.src_ip WHERE $__timeFilter(s.started_at) AND s.command_count > 0 ORDER BY s.started_at DESC LIMIT 25",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "showHeader": true,
+        "cellHeight": "sm",
+        "footer": {
+          "show": false,
+          "reducer": [
+            "sum"
+          ],
+          "countRows": false,
+          "fields": ""
+        }
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "inspect": false
+          }
+        },
+        "overrides": []
+      }
+    }
+  ],
+  "annotations": {
+    "list": []
+  },
+  "templating": {
+    "list": []
+  }
+}
