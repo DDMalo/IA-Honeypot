@@ -1,0 +1,16 @@
+# Refreshes the GeoLite2 databases. Triggered by geolite-update.timer.
+#
+# geoipupdate is MaxMind's own client: it verifies checksums and skips the
+# download when nothing changed, which keeps the free tier's 30-downloads-a-day
+# limit comfortably out of reach.
+
+[Unit]
+Description=Update the GeoLite2 databases
+Documentation=https://github.com/DDMalo/IA-Honeypot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/geoipupdate
+TimeoutStartSec=300

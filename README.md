@@ -54,6 +54,11 @@ pytest
 - [Homelab setup](docs/homelab-setup.md)
 - [Sensor setup](docs/sensor-setup.md)
 - [Tunnel between sensor and homelab](docs/tunnel.md)
+- [Privacy and data retention](docs/privacy.md)
+
+## Attribution
+
+Geolocation and network data come from [MaxMind](https://www.maxmind.com)'s GeoLite2 databases, used under their licence. The databases themselves are not redistributed in this repository.
 
 ## License
 

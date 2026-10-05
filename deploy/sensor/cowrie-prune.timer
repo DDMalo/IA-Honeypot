@@ -1,0 +1,13 @@
+# Daily, in the quiet hours. Nothing here is urgent: the window is measured in
+# days, so missing a run by a few hours changes nothing.
+
+[Unit]
+Description=Prune old Cowrie data daily
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

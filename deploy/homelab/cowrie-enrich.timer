@@ -1,0 +1,14 @@
+# Runs after ingestion has had time to add new sessions. Enrichment is
+# deliberately separate from ingestion: lookups must never delay capture.
+
+[Unit]
+Description=Enrich honeypot source addresses every 30 minutes
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=30min
+RandomizedDelaySec=180s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

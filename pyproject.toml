@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "honeypot-ai"
-version = "0.2.0"
+version = "0.3.0"
 description = "SSH/Telnet honeypot with AI-powered attack classification and MITRE ATT&CK mapping"
 readme = "README.md"
 license = "MIT"
@@ -14,6 +14,8 @@ dependencies = [
     "sqlalchemy>=2",
     "alembic>=1.13",
     "psycopg[binary]>=3.2",
+    "geoip2>=4.8",
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]

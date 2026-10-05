@@ -1,0 +1,17 @@
+# Copy to /etc/GeoIP.conf and fill in your own credentials, then keep it out of
+# the repository: the licence key is a secret.
+#
+#   sudo install -m 0600 GeoIP.conf.example /etc/GeoIP.conf
+#   sudo nano /etc/GeoIP.conf
+#
+# Both values come from the MaxMind account page after signing up for GeoLite2.
+
+AccountID YOUR_ACCOUNT_ID
+LicenseKey YOUR_LICENSE_KEY
+
+# City gives country, coordinates and (sometimes) a city; ASN gives the network
+# and the organisation that owns it. The ASN is the more reliable signal of the
+# two for attack analysis.
+EditionIDs GeoLite2-City GeoLite2-ASN
+
+DatabaseDirectory /srv/honeypot/geoip
