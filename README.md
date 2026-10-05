@@ -54,6 +54,7 @@ pytest
 - [Homelab setup](docs/homelab-setup.md)
 - [Sensor setup](docs/sensor-setup.md)
 - [Tunnel between sensor and homelab](docs/tunnel.md)
+- [Privacy and data retention](docs/privacy.md)
 
 ## Attribution
 

@@ -76,6 +76,25 @@ tail -f /srv/cowrie/log/cowrie.json
 
 Unsolicited login attempts usually start arriving within minutes.
 
+## Pruning captured data
+
+The sensor is a buffer, not an archive: everything it captures is copied to the homelab within minutes. It therefore keeps 30 days and no more — not for disk space, but because it is the most exposed machine in the project and it holds both personal data and live malware.
+
+```bash
+sudo install -m 0755 prune-cowrie-data.sh /usr/local/sbin/prune-cowrie-data.sh
+sudo install -m 0644 cowrie-prune.service /etc/systemd/system/
+sudo install -m 0644 cowrie-prune.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowrie-prune.timer
+
+sudo systemctl start cowrie-prune.service    # run once by hand
+journalctl -u cowrie-prune.service -n 20 --no-pager
+```
+
+Only rotated logs are touched; the file Cowrie is currently writing is left alone. The window is set with `COWRIE_RETENTION_DAYS` in the unit if 30 days is not right.
+
+The full policy, and why each number is what it is, is in [`docs/privacy.md`](../../docs/privacy.md).
+
 ## Operations
 
 ```bash

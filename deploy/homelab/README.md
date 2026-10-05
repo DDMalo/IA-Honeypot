@@ -250,6 +250,32 @@ SELECT count(*) FILTER (WHERE i.country_code IS NULL) AS unknown, count(*) AS to
 FROM sessions s LEFT JOIN ip_intel i ON i.ip = s.src_ip;
 ```
 
+## Retention
+
+Captured sessions contain IP addresses, which are personal data. Keeping them indefinitely needs a justification, so retention is enforced rather than intended. The reasoning, and what is kept where, is in [`docs/privacy.md`](../../docs/privacy.md).
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+
+python -m honeypot_ai.retention --dry-run   # rehearse: reports, changes nothing
+python -m honeypot_ai.retention             # enforce
+```
+
+Deleting is irreversible, which is why the dry run exists and why the default window is a generous year.
+
+On a timer, weekly:
+
+```bash
+sudo install -m 0644 cowrie-retention.service /etc/systemd/system/
+sudo install -m 0644 cowrie-retention.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowrie-retention.timer
+```
+
+Raw synced logs are pruned by the sync script itself, after `RAW_RETENTION_DAYS` (90 by default). The sensor prunes its own copies on its own timer — see `deploy/sensor/README.md`.
+
 ## Data handling
 
 Everything under `/srv/honeypot/raw`, and everything in the database, contains attacker IP addresses and stays on this machine: it is never committed, never published, and subject to the retention policy documented with the project's privacy notes. Only aggregates leave the homelab.
