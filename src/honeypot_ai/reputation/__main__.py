@@ -68,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
         level=logging.INFO if args.verbose else logging.WARNING,
         format="%(levelname)s %(message)s",
     )
+    # httpx logs every request at INFO, which drowns out this module's own
+    # messages the moment -v is passed.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
 
     with session_factory()() as db:
         addresses = pending_addresses(db, args.limit, args.max_age_days)

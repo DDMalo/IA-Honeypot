@@ -250,3 +250,57 @@ class IpIntelRow(Base):
         # addresses never checked, or checked before a cutoff.
         Index("ix_ip_intel_abuse_checked_at", "abuse_checked_at"),
     )
+
+
+class FileIntelRow(Base):
+    """What is known about one captured file, keyed by its hash.
+
+    Separate from `file_transfers` because the same dropper turns up in
+    hundreds of sessions: one lookup serves all of them, and the service it
+    comes from allows four requests a minute.
+
+    `known` is the field to branch on. False means VirusTotal has never been
+    sent this file by anyone — which, for a honeypot, is the most interesting
+    answer there is. It is recorded rather than treated as a failed lookup.
+
+    No sample is stored here, or anywhere else in the repository. Only the
+    hash, and what other people already know about it.
+    """
+
+    __tablename__ = "file_intel"
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    known: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    malicious: Mapped[int | None] = mapped_column(Integer)
+    suspicious: Mapped[int | None] = mapped_column(Integer)
+    harmless: Mapped[int | None] = mapped_column(Integer)
+    undetected: Mapped[int | None] = mapped_column(Integer)
+
+    # VirusTotal's own consensus name, e.g. "trojan.mirai/gafgyt".
+    threat_label: Mapped[str | None] = mapped_column(Text)
+    file_type: Mapped[str | None] = mapped_column(Text)
+    size_bytes: Mapped[int | None] = mapped_column(BigInteger)
+
+    # When anyone first submitted the file. Read against the honeypot's own
+    # capture time it says whether this is a new campaign or an old one.
+    first_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_analysis_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    vt_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_file_intel_threat_label", "threat_label"),
+        # The worker asks for hashes never checked, or unknown ones due a
+        # retry; both are answered from this pair.
+        Index("ix_file_intel_vt_checked_at", "vt_checked_at"),
+        Index("ix_file_intel_known", "known"),
+    )
