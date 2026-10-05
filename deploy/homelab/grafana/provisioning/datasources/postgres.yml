@@ -1,0 +1,24 @@
+# The database connection, defined as a file rather than clicked into the UI.
+#
+# Provisioning everything means a Grafana that is lost or rebuilt comes back
+# identical from the repository, and that what the dashboards query is visible
+# in review rather than buried in a container's internal database.
+
+apiVersion: 1
+
+datasources:
+  - name: honeypot
+    uid: honeypot-postgres
+    type: postgres
+    access: proxy
+    url: ${POSTGRES_HOST_FOR_GRAFANA:postgres:5432}
+    user: ${POSTGRES_USER}
+    database: ${POSTGRES_DB}
+    isDefault: true
+    editable: false
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD}
+    jsonData:
+      sslmode: disable       # both ends are on the same Docker network
+      postgresVersion: 1600
+      timescaledb: false

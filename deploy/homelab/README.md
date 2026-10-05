@@ -250,6 +250,61 @@ SELECT count(*) FILTER (WHERE i.country_code IS NULL) AS unknown, count(*) AS to
 FROM sessions s LEFT JOIN ip_intel i ON i.ip = s.src_ip;
 ```
 
+## Dashboards
+
+Grafana reads the database directly. Everything about it — the connection and every panel — is **provisioned from files in this repository**, not clicked into the UI: a Grafana that is lost or rebuilt comes back identical, and what the panels query is visible in review instead of buried inside a container.
+
+### Starting it
+
+Add a Grafana password to `.env` first (`GRAFANA_ADMIN_PASSWORD`), then:
+
+```bash
+cd ~/IA-Honeypot/deploy/homelab
+docker compose up -d
+docker compose ps
+```
+
+### Reaching it
+
+Grafana is bound to loopback, like PostgreSQL, so it is not reachable from the network even on the home LAN. Forward the port over the tunnel instead:
+
+```bash
+ssh -L 3000:localhost:3000 david@<homelab-tailnet-ip>
+```
+
+Then open `http://localhost:3000` on the machine you ran that from, and sign in with the credentials from `.env`.
+
+Keeping it private is not paranoia: the dashboard displays attacker IP addresses, which are personal data, and anonymous access would publish them to anyone on the network.
+
+### The dashboard
+
+`Honeypot overview` answers, in order, four questions:
+
+| Panels | Question |
+|---|---|
+| The four numbers across the top | How much, from how many, how much of it got in |
+| Sessions over time | Is this steady background scanning or a burst |
+| Usernames and passwords | What is being sprayed, and does it match public datasets |
+| Map, networks, commands, recent sessions | Who, and what they do once inside |
+
+A few deliberate choices, since dashboards drift otherwise:
+
+- **The time picker scopes every panel.** Every query filters on `started_at`, so changing the range changes everything at once rather than each card having its own controls.
+- **Bars are one colour.** Shading each bar by its own value would encode length twice and say nothing new.
+- **"Unique addresses" sits next to "Sessions" on purpose.** The gap between them is the story: a handful of bots account for most of the traffic.
+- **"Interactive sessions" is the number that matters.** Most sessions are credential stuffing that never gets in; the ones that run commands are what the classifier in v0.4.0 will work on.
+
+### Editing
+
+Changes made in the UI are written back to `deploy/homelab/grafana/dashboards/`, so a panel adjusted while exploring can be committed:
+
+```bash
+cd ~/IA-Honeypot
+git diff deploy/homelab/grafana/dashboards/
+```
+
+Exporting by hand through **Share → Export** also works, but the JSON then needs its `__inputs` block removed before it will provision.
+
 ## Retention
 
 Captured sessions contain IP addresses, which are personal data. Keeping them indefinitely needs a justification, so retention is enforced rather than intended. The reasoning, and what is kept where, is in [`docs/privacy.md`](../../docs/privacy.md).
