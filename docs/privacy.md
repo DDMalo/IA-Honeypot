@@ -30,11 +30,13 @@ Two of the enrichment steps involve someone else's data, and they are deliberate
 
 **Reputation** is the one exception to "nothing is sent out". Checking an address against AbuseIPDB means sending that address to AbuseIPDB — there is no way around it, and claiming otherwise would be dishonest. Three things keep it proportionate: only the address is sent, never credentials, commands or any other session content; each address is sent once a fortnight rather than once a session, because the result is cached; and the addresses in question are those of machines that attacked an unadvertised host, which is the behaviour AbuseIPDB exists to record. Removing the API key disables the step entirely and the rest of the pipeline continues working.
 
-**File hashes** sent to VirusTotal are not personal data: a SHA-256 of a malware sample says nothing about who delivered it. Samples themselves are never uploaded.
+**File hashes** sent to VirusTotal are not personal data: a SHA-256 says nothing about who delivered the file. Samples themselves are never uploaded — not for privacy reasons but for two others worth stating. Uploading publishes the file to everyone with a paid VirusTotal account, which may not be the submitter's to give away; and for a sample aimed at a specific target it tells the attacker their payload has been found. The code calls only the lookup endpoint, never the upload one.
 
 ## Retention
 
 Each copy of the data is kept only as long as it is needed where it sits.
+
+Reports on file hashes are removed with the transfers that referenced them. That is housekeeping rather than privacy — a hash identifies a file, not a person — but leaving them would mean a table that only ever grows.
 
 | Where | What | Kept for | Why that long |
 |---|---|---|---|

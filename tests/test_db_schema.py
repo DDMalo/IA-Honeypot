@@ -24,6 +24,7 @@ def test_every_expected_table_is_defined() -> None:
         "commands",
         "file_transfers",
         "ip_intel",
+        "file_intel",
     }
 
 

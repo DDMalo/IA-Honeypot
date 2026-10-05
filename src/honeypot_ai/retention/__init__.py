@@ -12,6 +12,7 @@ from honeypot_ai.retention.policy import (
     DEFAULT_SESSION_DAYS,
     RetentionStats,
     apply_retention,
+    prune_orphaned_file_intel,
     prune_orphaned_intel,
     prune_sessions,
 )
@@ -20,6 +21,7 @@ __all__ = [
     "DEFAULT_SESSION_DAYS",
     "RetentionStats",
     "apply_retention",
+    "prune_orphaned_file_intel",
     "prune_orphaned_intel",
     "prune_sessions",
 ]

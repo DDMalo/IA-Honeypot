@@ -43,7 +43,10 @@ def main(argv: list[str] | None = None) -> int:
         stats = apply_retention(db, args.days, args.dry_run)
 
     prefix = "Would delete" if args.dry_run else "Deleted"
-    print(f"{prefix}: {stats.sessions_deleted} sessions, {stats.addresses_deleted} addresses")
+    print(
+        f"{prefix}: {stats.sessions_deleted} sessions, {stats.addresses_deleted} addresses, "
+        f"{stats.hashes_deleted} file reports"
+    )
     return 0
 
 

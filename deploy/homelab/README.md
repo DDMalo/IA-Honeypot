@@ -103,6 +103,7 @@ alembic check                    # do the models and the database still agree?
 | `commands` | Every command typed, flagged when Cowrie could not emulate it |
 | `file_transfers` | URLs attackers tried to fetch, and hashes of anything captured |
 | `ip_intel` | One row per source address: location, network, reputation |
+| `file_intel` | One row per captured file hash: what VirusTotal knows about it |
 
 Two properties the ingestion worker depends on:
 
@@ -329,6 +330,81 @@ WHERE i.abuse_checked_at IS NULL;
 ```
 
 That third query is the one to keep an eye on. If reported and unreported addresses behave identically once they are in the shell, the score is not carrying information about this dataset and should not be fed to the classifier as though it were.
+
+## Captured files
+
+Cowrie records a SHA-256 for every file an attacker managed to put on the sensor. This turns that hash into a name.
+
+### What is sent, and what is not
+
+**Only the hash.** The sample itself never leaves the sensor and is never uploaded, which is a deliberate limit rather than a missing feature. Uploading a file to VirusTotal publishes it to everyone with a paid account — handing someone else's data to strangers, and, for a targeted sample, telling the attacker their payload has been found. A hash lookup does neither, and answers the question that matters anyway: is this a known family or something nobody has seen?
+
+Samples are never executed. `samples/` and `downloads/` are in `.gitignore`, so nothing captured can reach the repository even by accident.
+
+### Getting a key
+
+Register at [virustotal.com](https://www.virustotal.com), then your avatar → *API key*. The free tier allows four lookups a minute and 500 a day.
+
+```
+VIRUSTOTAL_API_KEY=...
+```
+
+### Running it
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+python -m honeypot_ai.malware --dry-run
+python -m honeypot_ai.malware -v
+```
+
+The dry run tells you how many hashes are due and roughly how long that will take, which is worth knowing: four a minute is glacial, and a hundred hashes is nearly half an hour of mostly waiting. Hashes are looked up in order of how many transfers carry them, so a limited run covers what is actually spreading.
+
+On a timer:
+
+```bash
+sudo install -m 0644 cowrie-malware.service /etc/systemd/system/
+sudo install -m 0644 cowrie-malware.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowrie-malware.timer
+systemctl list-timers 'cowrie-*'
+```
+
+### Reading the result
+
+`known = false` means VirusTotal has never been sent this file by anyone. For a honeypot that is the best outcome available, not a failed lookup: something fresh enough that no sandbox has seen it. Those hashes are asked about again a week later, in case someone else submits them in the meantime — a known hash, by contrast, is settled and never re-checked.
+
+```sql
+-- What has actually been dropped here, and how well known it is
+SELECT f.threat_label, f.file_type, count(DISTINCT t.session_id) AS sessions,
+       f.malicious, f.known
+FROM file_transfers t JOIN file_intel f ON f.sha256 = t.shasum
+GROUP BY 1, 2, 4, 5 ORDER BY 3 DESC;
+
+-- Samples nobody has ever submitted to VirusTotal
+SELECT t.shasum, count(*) AS transfers, min(t.occurred_at) AS first_seen
+FROM file_transfers t JOIN file_intel f ON f.sha256 = t.shasum
+WHERE f.known IS false
+GROUP BY 1 ORDER BY 2 DESC;
+
+-- How long a campaign has been running: the gap between the file's first
+-- submission anywhere and the day it reached this honeypot
+SELECT f.threat_label, f.first_seen_at, min(t.occurred_at) AS reached_us,
+       min(t.occurred_at) - f.first_seen_at AS lag
+FROM file_transfers t JOIN file_intel f ON f.sha256 = t.shasum
+WHERE f.first_seen_at IS NOT NULL
+GROUP BY 1, 2 ORDER BY 4;
+
+-- Where the files were fetched from, for the ones that have a URL
+SELECT t.url, t.shasum, f.threat_label
+FROM file_transfers t LEFT JOIN file_intel f ON f.sha256 = t.shasum
+WHERE t.url IS NOT NULL ORDER BY t.occurred_at DESC LIMIT 20;
+```
+
+That third query is the one worth looking at. A sample first submitted somewhere else two years ago means this sensor is being swept by an old, wide campaign; a lag of hours means it is close to the source of something new.
+
+Expect modest numbers. The sensor denies outbound traffic, so `wget` and `curl` fail inside the honeypot and most attempted downloads leave a URL but no file. What does get captured arrives by SCP or SFTP, where the attacker pushes the file rather than the sensor fetching it. Losing the fetched samples is the price of not running a machine that downloads malware on an attacker's behalf, and it is worth paying — the URL, which is what the analysis needs, is recorded either way.
 
 ## Retention
 
