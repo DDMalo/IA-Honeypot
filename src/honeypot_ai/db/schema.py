@@ -216,6 +216,25 @@ class IpIntelRow(Base):
     # must be distinguishable from "not looked up yet".
     geo_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Reputation, from AbuseIPDB. `abuse_score` is a 0-100 confidence that the
+    # address is a source of abuse, derived from reports other people filed —
+    # evidence, not a verdict, and biased towards ranges people bother to
+    # report. `abuse_usage_type` is the more interesting field: it separates a
+    # rented datacentre machine from a residential address, which is usually a
+    # compromised router rather than an attacker's own computer.
+    abuse_score: Mapped[int | None] = mapped_column(Integer)
+    abuse_reports: Mapped[int | None] = mapped_column(Integer)
+    abuse_reporters: Mapped[int | None] = mapped_column(Integer)
+    abuse_last_reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    abuse_isp: Mapped[str | None] = mapped_column(Text)
+    abuse_usage_type: Mapped[str | None] = mapped_column(Text)
+    abuse_domain: Mapped[str | None] = mapped_column(Text)
+    abuse_is_tor: Mapped[bool | None] = mapped_column(Boolean)
+
+    # Unlike geolocation, reputation goes stale: this is both "have we asked"
+    # and "how long ago", and the worker re-checks on it.
+    abuse_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -226,4 +245,8 @@ class IpIntelRow(Base):
     __table_args__ = (
         Index("ix_ip_intel_country_code", "country_code"),
         Index("ix_ip_intel_asn", "asn"),
+        Index("ix_ip_intel_abuse_score", "abuse_score"),
+        # The reputation worker's selection query asks for exactly this:
+        # addresses never checked, or checked before a cutoff.
+        Index("ix_ip_intel_abuse_checked_at", "abuse_checked_at"),
     )

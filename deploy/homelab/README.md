@@ -102,6 +102,7 @@ alembic check                    # do the models and the database still agree?
 | `login_attempts` | Every credential pair tried, in order |
 | `commands` | Every command typed, flagged when Cowrie could not emulate it |
 | `file_transfers` | URLs attackers tried to fetch, and hashes of anything captured |
+| `ip_intel` | One row per source address: location, network, reputation |
 
 Two properties the ingestion worker depends on:
 
@@ -250,60 +251,84 @@ SELECT count(*) FILTER (WHERE i.country_code IS NULL) AS unknown, count(*) AS to
 FROM sessions s LEFT JOIN ip_intel i ON i.ip = s.src_ip;
 ```
 
-## Dashboards
+## Reputation
 
-Grafana reads the database directly. Everything about it — the connection and every panel — is **provisioned from files in this repository**, not clicked into the UI: a Grafana that is lost or rebuilt comes back identical, and what the panels query is visible in review instead of buried inside a container.
+Geolocation says where a machine is. Reputation says whether anyone else has seen it misbehave — and, more usefully, what kind of address it is.
 
-### Starting it
+### Why it is a separate stage
 
-Add a Grafana password to `.env` first (`GF_SECURITY_ADMIN_PASSWORD`, next to `GF_SECURITY_ADMIN_USER`), then:
+Enrichment reads local files and can run every half hour without consequence. Reputation crosses the network against an allowance of 1,000 checks a day, so it has its own worker, its own timer and its own caching rule. Running them together would mean a rate limit on one delaying the other, for no gain.
 
-```bash
-cd ~/IA-Honeypot/deploy/homelab
-docker compose up -d
-docker compose ps
+### Getting a key
+
+Register at [abuseipdb.com](https://www.abuseipdb.com), then *Account* → *API* → *Create Key*. The free tier allows 1,000 checks a day, which is ample: the work is per address, not per session, and each result is trusted for a fortnight.
+
+Put it in `.env`:
+
+```
+ABUSEIPDB_API_KEY=...
 ```
 
-### Reaching it
+### Running it
 
-Grafana is bound to loopback, like PostgreSQL, so it is not reachable from the network even on the home LAN. Forward the port over the tunnel instead:
-
-```bash
-ssh -L 3000:localhost:3000 david@<homelab-tailnet-ip>
-```
-
-Then open `http://localhost:3000` on the machine you ran that from, and sign in with the credentials from `.env`.
-
-Keeping it private is not paranoia: the dashboard displays attacker IP addresses, which are personal data, and anonymous access would publish them to anyone on the network.
-
-### The dashboard
-
-`Honeypot overview` answers, in order, four questions:
-
-| Panels | Question |
-|---|---|
-| The four numbers across the top | How much, from how many, how much of it got in |
-| Sessions over time | Is this steady background scanning or a burst |
-| Usernames and passwords | What is being sprayed, and does it match public datasets |
-| Map, networks, commands, recent sessions | Who, and what they do once inside |
-
-A few deliberate choices, since dashboards drift otherwise:
-
-- **The time picker scopes every panel.** Every query filters on `started_at`, so changing the range changes everything at once rather than each card having its own controls.
-- **Bars are one colour.** Shading each bar by its own value would encode length twice and say nothing new.
-- **"Unique addresses" sits next to "Sessions" on purpose.** The gap between them is the story: a handful of bots account for most of the traffic.
-- **"Interactive sessions" is the number that matters.** Most sessions are credential stuffing that never gets in; the ones that run commands are what the classifier in v0.4.0 will work on.
-
-### Editing
-
-Changes made in the UI are written back to `deploy/homelab/grafana/dashboards/`, so a panel adjusted while exploring can be committed:
+Start with the dry run, which costs nothing and tells you how much of the budget a real run would spend:
 
 ```bash
 cd ~/IA-Honeypot
-git diff deploy/homelab/grafana/dashboards/
+source .venv/bin/activate
+set -a && . ./.env && set +a
+python -m honeypot_ai.reputation --dry-run
+python -m honeypot_ai.reputation -v
 ```
 
-Exporting by hand through **Share → Export** also works, but the JSON then needs its `__inputs` block removed before it will provision.
+The run reports how many checks are left for the day. Addresses are checked busiest first, so if the budget runs out it runs out on the long tail of one-session scanners rather than on the bot that has been hammering the sensor all week.
+
+On a timer — once a day is enough, since the allowance is daily and the data changes slowly:
+
+```bash
+sudo install -m 0644 cowrie-reputation.service /etc/systemd/system/
+sudo install -m 0644 cowrie-reputation.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowrie-reputation.timer
+systemctl list-timers 'cowrie-*'
+```
+
+### Reading the result honestly
+
+`abuse_score` is a 0-100 confidence drawn from reports other people filed. It is evidence, not a verdict, and it is biased: ranges that annoy people with the resources to file reports are reported heavily, domestic connections barely. A score of zero means nobody complained, not that the address is innocent — and this honeypot has the logs to prove otherwise.
+
+`abuse_usage_type` is the field worth the API call. It separates a rented datacentre machine, where someone is deliberately scanning the internet, from a residential address, which is almost always a compromised router or camera whose owner has no idea. That distinction is what the classifier in v0.4.0 will want, and it is not something the logs can tell you on their own.
+
+```sql
+-- The addresses other people have reported most, among those that got in
+SELECT s.src_ip, i.abuse_score, i.abuse_reports, i.abuse_usage_type, count(*) AS sessions
+FROM sessions s JOIN ip_intel i ON i.ip = s.src_ip
+WHERE i.abuse_score >= 50
+GROUP BY 1, 2, 3, 4 ORDER BY 5 DESC LIMIT 20;
+
+-- Rented infrastructure versus compromised home devices
+SELECT i.abuse_usage_type, count(DISTINCT s.src_ip) AS addresses, count(*) AS sessions
+FROM sessions s JOIN ip_intel i ON i.ip = s.src_ip
+WHERE i.abuse_usage_type IS NOT NULL
+GROUP BY 1 ORDER BY 3 DESC;
+
+-- Does a bad reputation predict an attacker who does more than guess passwords?
+SELECT
+  i.abuse_score >= 50 AS reported,
+  count(*) AS sessions,
+  count(*) FILTER (WHERE s.command_count > 0) AS interactive
+FROM sessions s JOIN ip_intel i ON i.ip = s.src_ip
+WHERE i.abuse_checked_at IS NOT NULL
+GROUP BY 1;
+
+-- How much of the budget is left to spend
+SELECT count(*) AS unchecked
+FROM (SELECT DISTINCT src_ip FROM sessions) s
+LEFT JOIN ip_intel i ON i.ip = s.src_ip
+WHERE i.abuse_checked_at IS NULL;
+```
+
+That third query is the one to keep an eye on. If reported and unreported addresses behave identically once they are in the shell, the score is not carrying information about this dataset and should not be fed to the classifier as though it were.
 
 ## Retention
 

@@ -1,0 +1,16 @@
+# Once a day. The allowance is daily, the data changes slowly, and a result is
+# trusted for a fortnight — nothing here is improved by running more often.
+#
+# Early morning on purpose: the night's scanning is already ingested, and the
+# quota resets on a daily boundary at the provider's end.
+
+[Unit]
+Description=Check honeypot source addresses against AbuseIPDB daily
+
+[Timer]
+OnCalendar=*-*-* 06:40:00
+RandomizedDelaySec=600s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
