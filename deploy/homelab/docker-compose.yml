@@ -63,8 +63,6 @@ services:
       # The datasource file reads these; Grafana substitutes them at load time,
       # so the password never appears in a committed file.
       POSTGRES_HOST_FOR_GRAFANA: postgres:5432
-      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
-      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD is not set}
       # Nobody signs up for a single-user dashboard, and anonymous viewers would
       # be reading attacker IP addresses.
       GF_USERS_ALLOW_SIGN_UP: "false"
