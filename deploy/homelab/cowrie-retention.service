@@ -1,0 +1,15 @@
+# Enforces database retention. Triggered by cowrie-retention.timer.
+
+[Unit]
+Description=Apply database retention policy
+Documentation=https://github.com/DDMalo/IA-Honeypot
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=david
+WorkingDirectory=/home/david/IA-Honeypot
+EnvironmentFile=/home/david/IA-Honeypot/.env
+ExecStart=/home/david/IA-Honeypot/.venv/bin/python -m honeypot_ai.retention -v
+TimeoutStartSec=900

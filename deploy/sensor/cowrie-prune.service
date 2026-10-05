@@ -1,0 +1,9 @@
+# Prunes captured data the sensor no longer needs. Triggered by cowrie-prune.timer.
+
+[Unit]
+Description=Prune old Cowrie logs, samples and recordings
+Documentation=https://github.com/DDMalo/IA-Honeypot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/prune-cowrie-data.sh

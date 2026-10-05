@@ -52,6 +52,16 @@ rsync \
 
 elapsed=$(( $(date +%s) - start ))
 
+# Rotated copies pulled from the sensor are kept longer here than there, but
+# not forever: they hold IP addresses, and the database is the thing that is
+# meant to last.
+RAW_RETENTION_DAYS="${RAW_RETENTION_DAYS:-90}"
+removed=$(find "$DEST_DIR" -type f -name 'cowrie.json.*' -mtime "+$RAW_RETENTION_DAYS" | wc -l)
+if (( removed > 0 )); then
+    find "$DEST_DIR" -type f -name 'cowrie.json.*' -mtime "+$RAW_RETENTION_DAYS" -delete
+    echo "Pruned $removed raw logs older than $RAW_RETENTION_DAYS days"
+fi
+
 if [[ -f "${DEST_DIR}/cowrie.json" ]]; then
     events=$(wc -l < "${DEST_DIR}/cowrie.json")
     echo "Sync finished in ${elapsed}s; ${events} events in cowrie.json"
