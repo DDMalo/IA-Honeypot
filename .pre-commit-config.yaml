@@ -29,7 +29,8 @@ repos:
       - id: mypy
         args: []
         files: ^(src|tests)/
-        additional_dependencies: ["pydantic>=2", "pytest>=8", "sqlalchemy>=2", "geoip2>=4.8"]
+        additional_dependencies:
+          ["pydantic>=2", "pytest>=8", "sqlalchemy>=2", "geoip2>=4.8", "httpx>=0.27"]
 
   - repo: https://github.com/gitleaks/gitleaks
     rev: v8.30.1

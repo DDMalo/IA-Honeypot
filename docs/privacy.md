@@ -20,7 +20,17 @@ Nothing is collected about anyone who does not connect to the honeypot, and the 
 
 The data is processed for **security research**: understanding how automated attacks against exposed SSH and Telnet services actually behave. That is a legitimate interest, and the measures below exist to keep the processing proportionate to it.
 
-The purpose bounds the use. The data is not used to identify individuals, is not combined with other sources to do so, is not shared with third parties, and is not used to retaliate against anyone.
+The purpose bounds the use. The data is not used to identify individuals, is not combined with other sources to do so, is not published in a form that identifies them, and is not used to retaliate against anyone.
+
+### External lookups
+
+Two of the enrichment steps involve someone else's data, and they are deliberately different.
+
+**Geolocation and network** come from MaxMind's GeoLite2 databases, which are **files on disk, queried offline**. No address ever leaves the homelab for this. That was a reason to choose database files over a web API, not merely a side effect.
+
+**Reputation** is the one exception to "nothing is sent out". Checking an address against AbuseIPDB means sending that address to AbuseIPDB — there is no way around it, and claiming otherwise would be dishonest. Three things keep it proportionate: only the address is sent, never credentials, commands or any other session content; each address is sent once a fortnight rather than once a session, because the result is cached; and the addresses in question are those of machines that attacked an unadvertised host, which is the behaviour AbuseIPDB exists to record. Removing the API key disables the step entirely and the rest of the pipeline continues working.
+
+**File hashes** sent to VirusTotal are not personal data: a SHA-256 of a malware sample says nothing about who delivered it. Samples themselves are never uploaded.
 
 ## Retention
 

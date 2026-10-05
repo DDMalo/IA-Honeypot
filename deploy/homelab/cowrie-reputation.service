@@ -1,0 +1,21 @@
+# Checks the reputation of addresses seen by the honeypot.
+# Triggered by cowrie-reputation.timer.
+#
+# Separate from cowrie-enrich because the constraint is different: geolocation
+# reads local files and can run every half hour, while this crosses the network
+# against a daily allowance of 1,000 checks.
+
+[Unit]
+Description=Check honeypot source addresses against AbuseIPDB
+Documentation=https://github.com/DDMalo/IA-Honeypot
+After=network-online.target cowrie-enrich.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=david
+WorkingDirectory=/home/david/IA-Honeypot
+EnvironmentFile=/home/david/IA-Honeypot/.env
+ExecStart=/home/david/IA-Honeypot/.venv/bin/python -m honeypot_ai.reputation
+# Checks are paced, so a full budget takes a few minutes of mostly waiting.
+TimeoutStartSec=2700
