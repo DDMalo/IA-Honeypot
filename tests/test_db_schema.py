@@ -23,6 +23,7 @@ def test_every_expected_table_is_defined() -> None:
         "login_attempts",
         "commands",
         "file_transfers",
+        "ip_intel",
     }
 
 

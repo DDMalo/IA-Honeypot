@@ -183,3 +183,47 @@ class FileTransferRow(Base):
         UniqueConstraint("session_id", "seq", name="uq_file_transfers_session_seq"),
         Index("ix_file_transfers_shasum", "shasum"),
     )
+
+
+class IpIntelRow(Base):
+    """What is known about one source address, independent of any session.
+
+    Addresses repeat heavily — a single bot hammers the honeypot for hours —
+    so this is keyed by address rather than carried on every session. One
+    lookup then serves thousands of rows, which matters because the data
+    behind it is rate-limited, paid for, or both.
+
+    Geolocation is an estimate, not a fact. It places the machine sending the
+    packets, which for a botnet is a compromised host rather than an attacker,
+    and city-level accuracy is poor. `country_code` and `asn` are the fields
+    worth drawing conclusions from; the coordinates are for drawing a map.
+    """
+
+    __tablename__ = "ip_intel"
+
+    ip: Mapped[str] = mapped_column(INET, primary_key=True)
+
+    country_code: Mapped[str | None] = mapped_column(String(2))
+    country_name: Mapped[str | None] = mapped_column(Text)
+    city: Mapped[str | None] = mapped_column(Text)
+    latitude: Mapped[float | None] = mapped_column(Float)
+    longitude: Mapped[float | None] = mapped_column(Float)
+
+    asn: Mapped[int | None] = mapped_column(Integer)
+    as_org: Mapped[str | None] = mapped_column(Text)
+
+    # Null when the databases had no entry for this address, which happens and
+    # must be distinguishable from "not looked up yet".
+    geo_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_ip_intel_country_code", "country_code"),
+        Index("ix_ip_intel_asn", "asn"),
+    )

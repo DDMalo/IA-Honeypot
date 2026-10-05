@@ -1,0 +1,14 @@
+# MaxMind publishes GeoLite2 updates twice a week, so checking twice a week is
+# enough. Address blocks are reassigned slowly; a database a few days old is
+# fine, one a year old is not.
+
+[Unit]
+Description=Update the GeoLite2 databases twice a week
+
+[Timer]
+OnCalendar=Tue,Fri 04:17
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
