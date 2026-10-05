@@ -167,6 +167,89 @@ SELECT network(set_masklen(src_ip, 24)) AS subnet, count(*)
 FROM sessions GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
 ```
 
+## Enrichment
+
+Sessions carry an address and nothing else. Enrichment turns that address into a country and a network, which is what makes the data answerable: *who* is attacking, not just *how much*.
+
+### What it is, and what it is not
+
+Geolocation places the machine sending the packets. For a botnet that is a compromised router in someone's house, not the person running it. **The country is where the traffic comes from, not where the attacker is**, and this distinction belongs in any conclusion drawn from it. The autonomous system — the network operator — is the sturdier signal: hosting providers and bulletproof hosts show up clearly, and they say more about intent than a flag does.
+
+City-level accuracy is poor and is kept only to draw a map.
+
+### Databases
+
+MaxMind's GeoLite2 databases are files queried offline. That beats a web API here: tens of thousands of addresses resolve in seconds, with no rate limit and nothing about the honeypot's traffic leaving the machine.
+
+They are free but require an account, and their licence requires attribution (see the project README).
+
+```bash
+sudo apt install -y geoipupdate
+sudo mkdir -p /srv/honeypot/geoip
+sudo chown david:david /srv/honeypot/geoip
+
+sudo install -m 0600 GeoIP.conf.example /etc/GeoIP.conf
+sudo nano /etc/GeoIP.conf          # AccountID and LicenseKey from maxmind.com
+sudo geoipupdate -v
+ls -la /srv/honeypot/geoip         # expect GeoLite2-City.mmdb and GeoLite2-ASN.mmdb
+```
+
+Keep them current — address blocks are reassigned, and a stale database quietly produces wrong answers:
+
+```bash
+sudo install -m 0644 geolite-update.service /etc/systemd/system/
+sudo install -m 0644 geolite-update.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now geolite-update.timer
+```
+
+### Running it
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+python -m honeypot_ai.enrich -v
+```
+
+Work is done per address, not per session: one bot accounts for hundreds of sessions, so resolving it once is the difference between a few thousand lookups and tens of thousands. Addresses already looked up are skipped, including those the databases did not recognise — "looked up, not known" is recorded as such so the lookup is not repeated forever.
+
+On a timer:
+
+```bash
+sudo install -m 0644 cowrie-enrich.service /etc/systemd/system/
+sudo install -m 0644 cowrie-enrich.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowrie-enrich.timer
+systemctl list-timers 'cowrie-*' 'geolite-*'
+```
+
+### Questions it opens up
+
+```sql
+-- Where the traffic comes from
+SELECT i.country_name, count(*) AS sessions
+FROM sessions s JOIN ip_intel i ON i.ip = s.src_ip
+GROUP BY 1 ORDER BY 2 DESC LIMIT 15;
+
+-- Which networks host the attackers: usually more telling than the country
+SELECT i.asn, i.as_org, count(*) AS sessions, count(DISTINCT s.src_ip) AS addresses
+FROM sessions s JOIN ip_intel i ON i.ip = s.src_ip
+WHERE i.asn IS NOT NULL
+GROUP BY 1, 2 ORDER BY 3 DESC LIMIT 15;
+
+-- Networks whose traffic actually gets in and runs commands, rather than
+-- just guessing passwords
+SELECT i.as_org, count(*) AS interactive
+FROM sessions s JOIN ip_intel i ON i.ip = s.src_ip
+WHERE s.command_count > 0
+GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
+
+-- How much of the traffic could not be resolved at all
+SELECT count(*) FILTER (WHERE i.country_code IS NULL) AS unknown, count(*) AS total
+FROM sessions s LEFT JOIN ip_intel i ON i.ip = s.src_ip;
+```
+
 ## Data handling
 
 Everything under `/srv/honeypot/raw`, and everything in the database, contains attacker IP addresses and stays on this machine: it is never committed, never published, and subject to the retention policy documented with the project's privacy notes. Only aggregates leave the homelab.
