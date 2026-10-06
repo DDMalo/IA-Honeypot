@@ -158,6 +158,14 @@ class Behaviour(StrEnum):
 
     # Shell acquisition
     SHELL_ESCAPE = "shell_escape"
+    SANDBOX_CHECK = "sandbox_check"
+    """Testing whether the shell is real.
+
+    `mount` shows an overlay filesystem, `env` leaks container variables,
+    `/proc/self` is thin inside a jail, and an empty `history` means nobody
+    has ever used this account. All four ask the same question: am I in a
+    honeypot? Which makes it the most self-aware thing in the corpus."""
+
     OBFUSCATED_COMMAND = "obfuscated_command"
     """A command that only becomes meaningful after decoding. Recorded in its
     own right: obfuscation is a choice the actor made, and worth counting."""

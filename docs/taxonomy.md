@@ -185,3 +185,26 @@ Decoded with a single-byte XOR of `0x09`, that is `enable`, `system`, `shell`, `
 Sessions decoded this way also carry an `obfuscated_command` behaviour, because choosing to obfuscate is itself a thing the actor did and worth counting.
 
 **A number that looks wrong and is not.** `gpu_detection` fires on 344 sessions but `resource_profiling` is the final label on only 72. That is the precedence rule doing its job: most of the hardware surveys go on to write and execute a test script, so they land on `staging`. The behaviour counts and the intent counts answer different questions, and this is the clearest example of why both exist.
+
+## Second pass: the sessions that were asking about us
+
+After those fixes `other` fell from 2.5% to 0.8% and rule coverage rose to 97.4%. What remained was almost entirely one family, four commands, each appearing in its own session:
+
+```
+env | head -10
+mount | head -5
+ls /proc/self 2>/dev/null | wc -l
+history | tail -5
+```
+
+These are not reconnaissance of the host. They are reconnaissance of the *shell*. `mount` reveals an overlay filesystem, `env` leaks container variables, `/proc/self` is conspicuously thin inside a jail, and an empty `history` means nobody has ever actually used the account. All four ask the same question: **am I in a honeypot?**
+
+That needed no new intent. `shell_probing` was already defined as "tried to obtain or confirm a usable shell", and confirming the shell is genuine is exactly that — so this became a behaviour, `sandbox_check`, under the intent that already covered it. Resisting the urge to add a category for every interesting finding is most of what keeps a taxonomy usable.
+
+It is worth sitting with what these sessions mean. Everything else in this corpus is a bot executing a fixed script against whatever answered. These are checking whether the thing that answered is real — which means somebody, somewhere, built the expectation of honeypots into their tooling. The honeypot is being studied back.
+
+Two smaller fixes came with it. The filesystem pattern anchored to end-of-line, so `ls /proc/self 2>/dev/null | wc -l` fell through for having a pipe after it. And a session whose only command is `exit` is now `credential_access`: issuing nothing but a way out is indistinguishable from issuing nothing at all.
+
+### Where this stops
+
+The remaining `other` is a long tail, and it stays that way. Writing a rule for each surviving session would produce a classifier that scores beautifully on this corpus and generalises to nothing — the rule engine's job is to be a fair baseline, not to win. Reaching the last fraction of a per cent by reading intent rather than matching strings is the work the language model is for, and the comparison is only honest if the baseline stops at a defensible point rather than being tuned until it looks good.
