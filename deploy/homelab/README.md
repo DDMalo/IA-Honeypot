@@ -406,6 +406,24 @@ That third query is the one worth looking at. A sample first submitted somewhere
 
 Expect modest numbers. The sensor denies outbound traffic, so `wget` and `curl` fail inside the honeypot and most attempted downloads leave a URL but no file. What does get captured arrives by SCP or SFTP, where the attacker pushes the file rather than the sensor fetching it. Losing the fetched samples is the price of not running a machine that downloads malware on an attacker's behalf, and it is worth paying — the URL, which is what the analysis needs, is recorded either way.
 
+## Classification
+
+The rule engine labels sessions from their commands, using the vocabulary in [`docs/taxonomy.md`](../../docs/taxonomy.md). It exists to be beaten: it is the baseline the language model has to improve on, and on data this repetitive it will not be easy.
+
+Nothing is written to the database yet — storing classifications comes with the pipeline integration. This reads:
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+python -m honeypot_ai.classify
+python -m honeypot_ai.classify --unmatched 20
+```
+
+The first prints the distribution across intents and behaviours, the mean rule coverage, and the accuracy a classifier would get by always answering the majority class — the floor any real classifier has to clear.
+
+The second is the one worth reading. It prints sessions where no rule matched anything, which are either a gap in the rules or a gap in the taxonomy. Only reading them tells you which.
+
 ## Retention
 
 Captured sessions contain IP addresses, which are personal data. Keeping them indefinitely needs a justification, so retention is enforced rather than intended. The reasoning, and what is kept where, is in [`docs/privacy.md`](../../docs/privacy.md).
