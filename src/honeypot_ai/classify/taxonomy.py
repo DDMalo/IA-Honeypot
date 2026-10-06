@@ -46,6 +46,20 @@ from enum import StrEnum
 class Intent(StrEnum):
     """What the actor was ultimately doing. Exactly one per session."""
 
+    PROTOCOL_PROBE = "protocol_probe"
+    """Spoke a different protocol at the port entirely.
+
+    Internet-wide census scanners send HTTP or SIP at whatever port answers,
+    so the honeypot records request headers — `User-Agent: ... zgrab/0.x`,
+    `CSeq: 42 OPTIONS` — where commands would be. The actor never engaged with
+    the emulated shell and may not know what it reached.
+
+    Its own category rather than `other` because conflating "ran uname on my
+    host" with "spoke HTTP at my SSH port" would quietly inflate every attack
+    statistic this project produces. It sits at the bottom of the precedence
+    order: this is the least engagement a session can have.
+    """
+
     CREDENTIAL_ACCESS = "credential_access"
     """Tried to log in and nothing more. No command was ever issued.
 
@@ -109,6 +123,7 @@ class Intent(StrEnum):
 #: Lowest to highest. A session's intent is the furthest category it reached.
 #: `OTHER` is absent on purpose — it is a fallback, never a rank.
 INTENT_PRECEDENCE: tuple[Intent, ...] = (
+    Intent.PROTOCOL_PROBE,
     Intent.CREDENTIAL_ACCESS,
     Intent.FINGERPRINTING,
     Intent.SHELL_PROBING,
@@ -134,9 +149,19 @@ class Behaviour(StrEnum):
     UPTIME_CHECK = "uptime_check"
     LOGIN_HISTORY_CHECK = "login_history_check"
     PROCESS_ENUMERATION = "process_enumeration"
+    FILESYSTEM_DISCOVERY = "filesystem_discovery"
+    NETWORK_DISCOVERY = "network_discovery"
+
+    # Not the shell at all
+    HTTP_REQUEST = "http_request"
+    SIP_REQUEST = "sip_request"
 
     # Shell acquisition
     SHELL_ESCAPE = "shell_escape"
+    OBFUSCATED_COMMAND = "obfuscated_command"
+    """A command that only becomes meaningful after decoding. Recorded in its
+    own right: obfuscation is a choice the actor made, and worth counting."""
+
     BUSYBOX_PROBE = "busybox_probe"
     MARKER_ECHO = "marker_echo"
     """Echoing a fixed string to confirm the shell executes and to identify

@@ -15,7 +15,13 @@ from __future__ import annotations
 import pytest
 
 from honeypot_ai.classify.facts import SessionFacts
-from honeypot_ai.classify.rules import RULES, classify, infer_operator, match_behaviours
+from honeypot_ai.classify.rules import (
+    RULES,
+    classify,
+    deobfuscate,
+    infer_operator,
+    match_behaviours,
+)
 from honeypot_ai.classify.taxonomy import Behaviour, Intent, Operator
 
 # --- Real sessions ---------------------------------------------------------
@@ -228,9 +234,10 @@ def test_a_single_command_says_nothing_about_who_sent_it() -> None:
 def test_every_behaviour_in_the_taxonomy_has_a_rule_or_another_source() -> None:
     """A behaviour nothing can ever produce is dead weight in the vocabulary."""
     from_rules = {rule.behaviour for rule in RULES}
-    # These two come from recorded transfers rather than command text.
+    # These come from somewhere other than a pattern over command text.
     from_transfers = {Behaviour.PAYLOAD_DOWNLOAD, Behaviour.PAYLOAD_EXECUTION}
-    assert from_rules | from_transfers == set(Behaviour)
+    from_decoder = {Behaviour.OBFUSCATED_COMMAND}
+    assert from_rules | from_transfers | from_decoder == set(Behaviour)
 
 
 def test_every_rule_explains_itself() -> None:
@@ -250,3 +257,93 @@ def test_matching_is_case_insensitive() -> None:
     lowered, _ = match_behaviours(facts("uname -a"))
     upped, _ = match_behaviours(facts("UNAME -A"))
     assert lowered == upped
+
+
+# --- Gaps found by running the rules over the whole corpus -----------------
+#
+# The first full run left 2.5% of sessions unlabelled, above the threshold
+# docs/taxonomy.md sets for "the taxonomy is wrong". Reading them produced the
+# four groups below. Each is a real session.
+
+OBFUSCATED_ESCAPE = ("lghkel", "zpz}ld", "zalee", "za")
+
+HTTP_PROBE = (
+    "User-Agent: Mozilla/5.0 zgrab/0.x",
+    "Accept: */*",
+    "Accept-Encoding: gzip",
+)
+
+SIP_PROBE = (
+    "From: <sip:nm@nm>;tag=root",
+    "To: <sip:nm2@nm2>",
+    "Call-ID: 50000",
+    "CSeq: 42 OPTIONS",
+    "Max-Forwards: 70",
+)
+
+
+def test_plain_hostname_is_host_enumeration() -> None:
+    """The first pattern required `hostnamectl`, so bare `hostname` fell through."""
+    label = classify(facts("hostname"))
+    assert label.intent is Intent.FINGERPRINTING
+    assert Behaviour.HOST_ENUMERATION in label.behaviours
+
+
+@pytest.mark.parametrize("command", ["pwd", "ls -la /", "df", "find / -name x"])
+def test_looking_around_the_filesystem_is_fingerprinting(command: str) -> None:
+    label = classify(facts(command))
+    assert label.intent is Intent.FINGERPRINTING
+    assert Behaviour.FILESYSTEM_DISCOVERY in label.behaviours
+
+
+@pytest.mark.parametrize("command", ["netstat -tulpn | head -10", "ss -lntp", "ifconfig"])
+def test_looking_at_the_network_is_fingerprinting(command: str) -> None:
+    label = classify(facts(command))
+    assert label.intent is Intent.FINGERPRINTING
+    assert Behaviour.NETWORK_DISCOVERY in label.behaviours
+
+
+def test_an_http_scanner_is_a_protocol_probe_not_an_attack() -> None:
+    """zgrab speaking HTTP at port 22 never touched the shell."""
+    label = classify(facts(*HTTP_PROBE))
+    assert label.intent is Intent.PROTOCOL_PROBE
+    assert Behaviour.HTTP_REQUEST in label.behaviours
+
+
+def test_a_sip_probe_is_a_protocol_probe() -> None:
+    label = classify(facts(*SIP_PROBE))
+    assert label.intent is Intent.PROTOCOL_PROBE
+    assert Behaviour.SIP_REQUEST in label.behaviours
+
+
+def test_a_protocol_probe_loses_to_any_real_engagement() -> None:
+    """Bottom of the precedence order: least engagement a session can have."""
+    label = classify(facts(*HTTP_PROBE, "uname -a"))
+    assert label.intent is Intent.FINGERPRINTING
+
+
+def test_the_xor_encoded_escape_sequence_is_recognised() -> None:
+    """`lghkel zpz}ld zalee za` is `enable system shell sh` XOR 0x09."""
+    label = classify(facts(*OBFUSCATED_ESCAPE))
+    assert label.intent is Intent.SHELL_PROBING
+    assert Behaviour.SHELL_ESCAPE in label.behaviours
+    assert Behaviour.OBFUSCATED_COMMAND in label.behaviours
+
+
+@pytest.mark.parametrize(
+    ("encoded", "plain"),
+    [("lghkel", "enable"), ("zpz}ld", "system"), ("zalee", "shell"), ("za", "sh")],
+)
+def test_each_encoded_word_decodes_to_its_plain_form(encoded: str, plain: str) -> None:
+    assert deobfuscate(encoded) == plain
+
+
+def test_decoding_never_reinterprets_a_command_that_already_matched() -> None:
+    """The decoder may add a missed match; it may never override a real one."""
+    label = classify(facts("uname -a"))
+    assert Behaviour.OBFUSCATED_COMMAND not in label.behaviours
+
+
+@pytest.mark.parametrize("noise", ["please stop scanning me", "hello world", "$$$$", ""])
+def test_decoding_refuses_to_turn_noise_into_a_label(noise: str) -> None:
+    assert deobfuscate(noise) is None
