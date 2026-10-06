@@ -34,6 +34,26 @@ A third, independent field records whether a human appeared to be at the keyboar
 
 ## Intents
 
+### `protocol_probe`
+
+Spoke a different protocol at the port entirely.
+
+```
+User-Agent: Mozilla/5.0 zgrab/0.x
+Accept: */*
+Accept-Encoding: gzip
+```
+
+```
+From: <sip:nm@nm>;tag=root
+CSeq: 42 OPTIONS
+Max-Forwards: 70
+```
+
+Internet-wide census scanners send HTTP or SIP at whatever port answers, so the honeypot records request headers where commands would be. The actor never engaged with the emulated shell and may not know what it reached.
+
+This has its own category rather than living in `other` because conflating "ran `uname` on my host" with "spoke HTTP at my SSH port" would quietly inflate every attack statistic this project produces. It sits at the bottom of the precedence order: this is the least engagement a session can have.
+
 ### `credential_access`
 
 Logged in and nothing more. No command was ever issued.
@@ -110,7 +130,8 @@ Most sessions do more than one thing, so the single label needs a tie-break that
 **The intent is the furthest point reached**, in this order:
 
 ```
-credential_access → fingerprinting → shell_probing → resource_profiling → staging → persistence
+protocol_probe → credential_access → fingerprinting → shell_probing
+    → resource_profiling → staging → persistence
 ```
 
 A session that runs `uname`, then writes an SSH key, is `persistence` — not `fingerprinting` — because the fingerprinting was in service of the rest.
@@ -141,3 +162,26 @@ Behaviours are the layer that gets ATT&CK technique identifiers attached in v0.6
 It does not attribute sessions to campaigns or families. The data clearly contains distinct, recognisable actors — the nine-command escape sequence, the `.f` directory sweep, the single recurring SSH key — but naming them is clustering, which is v1.2.0, and guessing at family names from fragments is how threat reports end up wrong.
 
 It does not describe severity. A persistence attempt is further along than a fingerprint, which is what precedence captures; whether it is *worse* depends on a real system's context, and this honeypot has none.
+
+## Revision: what the first full run changed
+
+The rules were run over the whole corpus — 11,991 sessions by then — and 2.5% came back as `other`, above the threshold this document sets for "the taxonomy is wrong and should change". Reading those sessions produced four findings, which is the loop working rather than failing.
+
+**Scanners speaking other protocols.** HTTP and SIP requests arriving at ports 22 and 23, from census tools like zgrab. Not attacks on the honeypot in any sense this taxonomy was built for, and counting them as reconnaissance would have inflated every figure. Now `protocol_probe`.
+
+**Ordinary looking around.** `pwd`, `ls -la /`, `netstat -tulpn`, `hostname`, `ssh -V`. Fingerprinting, plainly, but the first pass had no patterns for filesystem or network discovery — and the host-enumeration pattern required `hostnamectl`, so bare `hostname` fell straight through. Two new behaviours and one fixed pattern.
+
+**The same attack, obfuscated.** Eleven of the first twenty unlabelled sessions were this:
+
+```
+lghkel
+zpz}ld
+zalee
+za
+```
+
+Decoded with a single-byte XOR of `0x09`, that is `enable`, `system`, `shell`, `sh` — the identical restricted-shell escape sequence as every other Mirai-family session in the corpus, sent through a client that obfuscates it. The rule engine now tries that decode, under two constraints that matter: the decoded text must be printable, and it must match a rule that already exists. The decoder can therefore surface a match that was missed, but can never invent a category or override a plain-text one. A decoder free to reinterpret anything eventually reinterprets something real.
+
+Sessions decoded this way also carry an `obfuscated_command` behaviour, because choosing to obfuscate is itself a thing the actor did and worth counting.
+
+**A number that looks wrong and is not.** `gpu_detection` fires on 344 sessions but `resource_profiling` is the final label on only 72. That is the precedence rule doing its job: most of the hardware surveys go on to write and execute a test script, so they land on `staging`. The behaviour counts and the intent counts answer different questions, and this is the clearest example of why both exist.

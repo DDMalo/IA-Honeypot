@@ -60,9 +60,9 @@ RULES: tuple[Rule, ...] = (
     # ---- Discovery -------------------------------------------------------
     _rule(
         Behaviour.HOST_ENUMERATION,
-        r"\buname\b|/proc/version|/etc/os-release|\bhostnamectl?\b",
+        r"\buname\b|/proc/version|/etc/os-release|\bhostname(ctl)?\b|\bssh\s+-V\b",
         Intent.FINGERPRINTING,
-        "asks what the host is",
+        "asks what the host is, or what software it runs",
     ),
     _rule(
         Behaviour.USER_ENUMERATION,
@@ -101,10 +101,36 @@ RULES: tuple[Rule, ...] = (
         "checks whether anyone else is watching",
     ),
     _rule(
+        Behaviour.FILESYSTEM_DISCOVERY,
+        r"^\s*(pwd|ls(\s+-\S+)*(\s+/\S*)?|df|du|find\s+/)\s*$|\bls\s+-la\b|\bfind\s+/\s",
+        Intent.FINGERPRINTING,
+        "looks around the filesystem",
+    ),
+    _rule(
+        Behaviour.NETWORK_DISCOVERY,
+        r"\bnetstat\b|\bss\s+-|\bifconfig\b|\bip\s+a(ddr)?\b|\barp\s+-|/proc/net/",
+        Intent.FINGERPRINTING,
+        "looks at what the host is connected to",
+    ),
+    _rule(
         Behaviour.PROCESS_ENUMERATION,
         r"\bps\s+-|\bps\s+aux|/proc/\*|proc_dir|\btop\b",
         None,
         "looks at what is running; happens at every stage",
+    ),
+    # ---- Not the shell at all --------------------------------------------
+    _rule(
+        Behaviour.HTTP_REQUEST,
+        r"^\s*(get|post|head)\s+\S+\s+http/\d|^\s*(user-agent|accept|accept-encoding|host"
+        r"|connection|content-length):",
+        Intent.PROTOCOL_PROBE,
+        "an HTTP request sent at a port that does not speak HTTP",
+    ),
+    _rule(
+        Behaviour.SIP_REQUEST,
+        r"^\s*(call-id|cseq|max-forwards|via|from|to):\s|sip:",
+        Intent.PROTOCOL_PROBE,
+        "a SIP probe; census scanners try every protocol on every port",
     ),
     # ---- Getting a shell -------------------------------------------------
     _rule(
@@ -203,6 +229,36 @@ RULES: tuple[Rule, ...] = (
     ),
 )
 
+
+#: Single-byte XOR keys worth trying. Deliberately small: every extra key is
+#: another chance to turn noise into a false match, and 0x09 is the one this
+#: honeypot has actually seen.
+XOR_KEYS: tuple[int, ...] = (0x09,)
+
+
+def deobfuscate(command: str) -> str | None:
+    """Return a decoded form of `command` if one is both printable and known.
+
+    Some sessions arrive as `lghkel`, `zpz}ld`, `zalee`, `za`. Decoded with a
+    single-byte XOR of 0x09 those are `enable`, `system`, `shell`, `sh` — the
+    same restricted-shell escape sequence as every other Mirai-family session,
+    sent through a client that obfuscates it.
+
+    The decode is deliberately conservative. A candidate is accepted only when
+    it is printable **and** matches a rule that already exists, so this can add
+    a match that was missed but can never invent a category or override a
+    plain-text one. That asymmetry is the point: a decoder that is allowed to
+    reinterpret anything will eventually reinterpret something real.
+    """
+    for key in XOR_KEYS:
+        candidate = "".join(chr(ord(character) ^ key) for character in command)
+        if not candidate.isprintable():
+            continue
+        if any(rule.pattern.search(candidate) for rule in RULES):
+            return candidate
+    return None
+
+
 #: Below this gap, nobody typed it. Generous on purpose: the claim being made
 #: is only "certainly a script", never "certainly a person".
 AUTOMATED_GAP_SECONDS = 1.0
@@ -217,12 +273,22 @@ def match_behaviours(facts: SessionFacts) -> tuple[frozenset[Behaviour], int]:
     found: set[Behaviour] = set()
     matched_commands = 0
 
-    for command in facts.commands:
+    for raw in facts.commands:
         hit = False
         for rule in RULES:
-            if rule.pattern.search(command):
+            if rule.pattern.search(raw):
                 found.add(rule.behaviour)
                 hit = True
+
+        if not hit:
+            decoded = deobfuscate(raw)
+            if decoded is not None:
+                found.add(Behaviour.OBFUSCATED_COMMAND)
+                for rule in RULES:
+                    if rule.pattern.search(decoded):
+                        found.add(rule.behaviour)
+                        hit = True
+
         if hit:
             matched_commands += 1
 
