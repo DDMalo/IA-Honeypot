@@ -347,3 +347,50 @@ def test_decoding_never_reinterprets_a_command_that_already_matched() -> None:
 @pytest.mark.parametrize("noise", ["please stop scanning me", "hello world", "$$$$", ""])
 def test_decoding_refuses_to_turn_noise_into_a_label(noise: str) -> None:
     assert deobfuscate(noise) is None
+
+
+# --- Second pass: what was left after the first round of fixes -------------
+#
+# `other` fell from 2.5% to 0.8%, and the remainder turned out to be one
+# family asking one question.
+
+SANDBOX_CHECK = (
+    "env | head -10",
+    "mount | head -5",
+    "ls /proc/self 2>/dev/null | wc -l",
+    "history | tail -5",
+)
+
+
+@pytest.mark.parametrize("command", SANDBOX_CHECK)
+def test_checking_whether_the_shell_is_real_is_shell_probing(command: str) -> None:
+    """mount, env, /proc/self and history all ask: am I in a honeypot?"""
+    label = classify(facts(command))
+    assert label.intent is Intent.SHELL_PROBING
+    assert Behaviour.SANDBOX_CHECK in label.behaviours
+
+
+def test_a_piped_listing_still_counts_as_looking_around() -> None:
+    """The first pattern anchored to end-of-line, so `ls /x | wc -l` fell through."""
+    _, matched = match_behaviours(facts("ls /proc/self 2>/dev/null | wc -l"))
+    assert matched == 1
+
+
+def test_reading_history_is_not_clearing_it() -> None:
+    label = classify(facts("history | tail -5"))
+    assert Behaviour.HISTORY_CLEARING not in label.behaviours
+    assert Behaviour.SANDBOX_CHECK in label.behaviours
+
+
+@pytest.mark.parametrize("command", ["exit", "quit", "logout", " EXIT "])
+def test_a_session_that_only_leaves_is_credential_access(command: str) -> None:
+    """Issuing `exit` and nothing else is indistinguishable from issuing nothing."""
+    label = classify(facts(command))
+    assert label.intent is Intent.CREDENTIAL_ACCESS
+    assert label.confidence == 1.0
+    assert label.notes == "logged in and left"
+
+
+def test_leaving_after_doing_something_is_not_credential_access() -> None:
+    label = classify(facts("uname -a", "exit"))
+    assert label.intent is Intent.FINGERPRINTING

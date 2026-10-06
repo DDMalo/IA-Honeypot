@@ -102,7 +102,7 @@ RULES: tuple[Rule, ...] = (
     ),
     _rule(
         Behaviour.FILESYSTEM_DISCOVERY,
-        r"^\s*(pwd|ls(\s+-\S+)*(\s+/\S*)?|df|du|find\s+/)\s*$|\bls\s+-la\b|\bfind\s+/\s",
+        r"^\s*(pwd|df|du)\b|\bls\s+(-\S+\s+)*/|\bls\s+-l?a\b|\bfind\s+/\s|\bstat\s+/",
         Intent.FINGERPRINTING,
         "looks around the filesystem",
     ),
@@ -117,6 +117,13 @@ RULES: tuple[Rule, ...] = (
         r"\bps\s+-|\bps\s+aux|/proc/\*|proc_dir|\btop\b",
         None,
         "looks at what is running; happens at every stage",
+    ),
+    _rule(
+        Behaviour.SANDBOX_CHECK,
+        r"\bmount\b|^\s*env\b|/proc/self\b|^\s*history\s*(\||$)|/proc/1/cgroup"
+        r"|\.dockerenv|\bsystemd-detect-virt\b|\bvirt-what\b|\bdmidecode\b",
+        Intent.SHELL_PROBING,
+        "asks whether the shell is real; the same question shell_probing asks",
     ),
     # ---- Not the shell at all --------------------------------------------
     _rule(
@@ -259,6 +266,11 @@ def deobfuscate(command: str) -> str | None:
     return None
 
 
+#: Commands that only end the session. A session consisting of nothing else
+#: is indistinguishable from one that issued no commands at all.
+TERMINATORS = frozenset({"exit", "quit", "logout", "bye"})
+
+
 #: Below this gap, nobody typed it. Generous on purpose: the claim being made
 #: is only "certainly a script", never "certainly a person".
 AUTOMATED_GAP_SECONDS = 1.0
@@ -320,14 +332,15 @@ def infer_operator(facts: SessionFacts) -> Operator:
 
 def classify(facts: SessionFacts) -> Label:
     """Label one session."""
-    if not facts.commands and not facts.download_urls:
+    only_left = all(command.strip().lower() in TERMINATORS for command in facts.commands)
+    if (not facts.commands or only_left) and not facts.download_urls:
         # Logged in and left. Full confidence: there is nothing to misread.
         return Label(
             session_id=facts.session_id,
             intent=Intent.CREDENTIAL_ACCESS,
             operator=Operator.UNKNOWN,
             confidence=1.0,
-            notes="no commands issued",
+            notes="no commands issued" if not facts.commands else "logged in and left",
         )
 
     behaviours, matched_commands = match_behaviours(facts)
