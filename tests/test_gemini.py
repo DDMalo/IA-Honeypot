@@ -15,11 +15,17 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from unittest import mock
 
 import httpx
 import pytest
 
-from honeypot_ai.classify.llm.gemini import GeminiProvider, response_schema
+from honeypot_ai.classify.llm.gemini import (
+    _BACKOFF,
+    DEFAULT_MODEL,
+    GeminiProvider,
+    response_schema,
+)
 from honeypot_ai.classify.llm.provider import (
     PermanentProviderError,
     Provider,
@@ -305,3 +311,54 @@ def test_a_non_json_error_body_still_produces_something_readable() -> None:
     provider = provider_returning(httpx.Response(400, text="<html>  gateway\n error </html>"))
     with pytest.raises(PermanentProviderError, match="gateway error"):
         provider.complete("s", "u")
+
+
+# --- Waiting for the right length of time ----------------------------------
+
+
+def test_an_overloaded_model_is_waited_out_longer_than_a_dropped_connection() -> None:
+    """Two seconds after a 503 is not a pause, it is another request."""
+    provider = provider_returning()
+    assert _BACKOFF["overloaded"][0] > _BACKOFF["network"][0]
+    assert all(
+        later >= earlier
+        for schedule in _BACKOFF.values()
+        for earlier, later in zip(schedule, schedule[1:], strict=False)
+    ), "every schedule must grow"
+    assert provider is not None
+
+
+def test_a_rate_limit_obeys_the_wait_the_server_asked_for() -> None:
+    """The server knows when its window resets; this code does not."""
+    waited: list[float] = []
+    provider = provider_returning(
+        httpx.Response(429, headers={"Retry-After": "7"}),
+        httpx.Response(200, json=generate_content(json.dumps(ANSWER))),
+    )
+    with mock.patch("honeypot_ai.classify.llm.gemini.time.sleep", waited.append):
+        provider.complete("s", "u")
+
+    assert 7.0 in waited
+
+
+def test_a_nonsense_retry_after_falls_back_to_the_schedule() -> None:
+    waited: list[float] = []
+    provider = provider_returning(
+        httpx.Response(429, headers={"Retry-After": "soon"}),
+        httpx.Response(200, json=generate_content(json.dumps(ANSWER))),
+    )
+    with mock.patch("honeypot_ai.classify.llm.gemini.time.sleep", waited.append):
+        provider.complete("s", "u")
+
+    assert _BACKOFF["rate_limit"][0] in waited
+
+
+def test_an_absurd_retry_after_is_capped() -> None:
+    """A server asking for an hour must not stall the run for an hour."""
+    provider = provider_returning(httpx.Response(429, headers={"Retry-After": "99999"}))
+    assert provider._retry_after(httpx.Response(429, headers={"Retry-After": "99999"})) == 120.0
+
+
+def test_the_default_model_is_pinned_not_an_alias() -> None:
+    """An alias would move under the benchmark and invalidate the comparison."""
+    assert "latest" not in DEFAULT_MODEL
