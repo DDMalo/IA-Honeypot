@@ -99,7 +99,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  model: {by_model.intent.value}  — {by_model.notes or ''}")
             print()
 
-        print(classifier.stats)
+        stats = classifier.stats
+        attempted = len(chosen)
+        print(stats)
+        if attempted:
+            print(
+                f"\nAvailability: {stats.classified}/{attempted} sessions got an answer "
+                f"({stats.classified / attempted:.0%})."
+            )
+            if stats.classified < attempted:
+                print(
+                    "  A hosted free tier that answers some of the time is a result, "
+                    "not a bug to hide:\n"
+                    "  it is the number the local provider has to be compared against."
+                )
 
     return 0
 

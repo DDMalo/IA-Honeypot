@@ -55,15 +55,20 @@ DEFAULT_MODEL = "gemini-3.5-flash-lite"
 #: Google's own documentation rather than trusting this comment.
 DEFAULT_MIN_INTERVAL = 4.0
 
-DEFAULT_TIMEOUT = 60.0
-MAX_ATTEMPTS = 3
+#: Generous, because the observed failure is a read timing out rather than a
+#: refusal: on a congested free tier the request is queued, not rejected, and
+#: a minute is not long enough to outlast the queue. The task itself takes a
+#: model about a second.
+DEFAULT_TIMEOUT = 150.0
+
+MAX_ATTEMPTS = 4
 
 #: Seconds to wait before each retry, by what went wrong. A busy model needs
 #: tens of seconds to recover; a dropped connection needs barely any.
 _BACKOFF: dict[str, tuple[float, ...]] = {
-    "network": (2.0, 5.0, 10.0),
-    "overloaded": (5.0, 20.0, 45.0),
-    "rate_limit": (20.0, 45.0, 90.0),
+    "network": (2.0, 5.0, 10.0, 20.0),
+    "overloaded": (5.0, 20.0, 45.0, 90.0),
+    "rate_limit": (20.0, 45.0, 90.0, 120.0),
 }
 MAX_OUTPUT_TOKENS = 512
 

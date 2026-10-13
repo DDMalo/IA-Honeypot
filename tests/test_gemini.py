@@ -23,6 +23,7 @@ import pytest
 from honeypot_ai.classify.llm.gemini import (
     _BACKOFF,
     DEFAULT_MODEL,
+    MAX_ATTEMPTS,
     GeminiProvider,
     response_schema,
 )
@@ -213,7 +214,7 @@ def test_a_server_error_is_retried_and_then_succeeds() -> None:
 
 
 def test_a_persistent_rate_limit_becomes_a_provider_error() -> None:
-    limited = [httpx.Response(429, headers={"Retry-After": "0"}) for _ in range(3)]
+    limited = [httpx.Response(429, headers={"Retry-After": "0"}) for _ in range(MAX_ATTEMPTS)]
     provider = provider_returning(*limited)
 
     with pytest.raises(ProviderError, match="rate limit"):
@@ -362,3 +363,10 @@ def test_an_absurd_retry_after_is_capped() -> None:
 def test_the_default_model_is_pinned_not_an_alias() -> None:
     """An alias would move under the benchmark and invalidate the comparison."""
     assert "latest" not in DEFAULT_MODEL
+
+
+def test_every_backoff_schedule_covers_every_attempt() -> None:
+    """A schedule shorter than MAX_ATTEMPTS would reuse its last value in
+    silence — fine by accident, wrong the moment either is tuned."""
+    for kind, schedule in _BACKOFF.items():
+        assert len(schedule) >= MAX_ATTEMPTS - 1, kind
