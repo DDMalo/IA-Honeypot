@@ -437,9 +437,13 @@ set -a && . ./.env && set +a
 python -m honeypot_ai.classify.llm --models
 ```
 
-If the default is not in that list, set `GEMINI_MODEL` in `.env` to one that is — which will happen, because Google retires model names. It has happened to this project once already: the default was valid when it was written and returned a 404 a few months later. The failure is deliberately loud and says which model to use instead.
+**That listing is not a list of models you can use.** It reports what the API knows about, not what your key may call: a recently created key is refused older models with "no longer available to new users", even though they appear in the list. The only reliable test is to try one.
+
+If the default is refused, set `GEMINI_MODEL` in `.env` to another — which will happen eventually, because Google retires model names. It has happened to this project once already: the default was valid when it was written and returned a 404 a few months later. The failure is deliberately loud and says which model to use instead.
 
 The default is a pinned name rather than an alias like `gemini-flash-latest`, because a benchmark whose model changes underneath it is not a benchmark. The trade-off is this maintenance.
+
+It is also deliberately one of the smaller models. The newest flagship was tried first and spent its time returning 503 and 429; a lighter model answered every request on the first attempt. For a task that is "put nine commands into one of seven categories", the largest model in the catalogue is the wrong tool — and if a small model turns out to be enough, that is a result worth reporting rather than a compromise worth hiding.
 
 Then try it on a few real sessions:
 

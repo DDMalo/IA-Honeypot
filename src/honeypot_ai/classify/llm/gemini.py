@@ -36,12 +36,18 @@ logger = logging.getLogger(__name__)
 
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta"
 
-#: Pinned rather than an alias like `gemini-flash-latest`: a benchmark whose
-#: model silently changes underneath it is not a benchmark. The cost is that
-#: this name will eventually be retired — it has happened to this project
+#: The smallest model that does the job, which is the right size for it: this
+#: task is "put nine commands into one of seven categories", not something
+#: that needs the largest model in the catalogue. The newest flagship was
+#: tried first and spent its time returning 503 and 429; this one answered
+#: every request on the first attempt.
+#:
+#: Pinned rather than an alias like `gemini-flash-latest`, because a benchmark
+#: whose model silently changes underneath it is not a benchmark. The cost is
+#: that this name will eventually be retired — it has happened to this project
 #: once already — so `list_models()` reports what the key can reach and
 #: `GEMINI_MODEL` overrides this without a code change.
-DEFAULT_MODEL = "gemini-3.8-flash"
+DEFAULT_MODEL = "gemini-3.5-flash-lite"
 
 #: Free-tier limits move, so this is a conservative floor rather than a claim
 #: about the current quota: four seconds between requests is fifteen a minute.
@@ -51,6 +57,14 @@ DEFAULT_MIN_INTERVAL = 4.0
 
 DEFAULT_TIMEOUT = 60.0
 MAX_ATTEMPTS = 3
+
+#: Seconds to wait before each retry, by what went wrong. A busy model needs
+#: tens of seconds to recover; a dropped connection needs barely any.
+_BACKOFF: dict[str, tuple[float, ...]] = {
+    "network": (2.0, 5.0, 10.0),
+    "overloaded": (5.0, 20.0, 45.0),
+    "rate_limit": (20.0, 45.0, 90.0),
+}
 MAX_OUTPUT_TOKENS = 512
 
 
@@ -157,7 +171,11 @@ class GeminiProvider:
             if response.status_code == httpx.codes.TOO_MANY_REQUESTS:
                 if attempt == MAX_ATTEMPTS:
                     raise ProviderError("Gemini rate limit reached")
-                self._back_off(attempt, response.headers.get("Retry-After"))
+                asked = self._retry_after(response)
+                if asked is not None:
+                    time.sleep(asked)
+                else:
+                    self._back_off(attempt, "rate_limit")
                 continue
 
             if response.status_code in (httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN):
@@ -173,7 +191,7 @@ class GeminiProvider:
             if response.status_code >= httpx.codes.INTERNAL_SERVER_ERROR:
                 if attempt == MAX_ATTEMPTS:
                     raise ProviderError(f"Gemini returned {response.status_code}")
-                self._back_off(attempt)
+                self._back_off(attempt, "overloaded")
                 continue
 
             if response.status_code != httpx.codes.OK:
@@ -210,14 +228,32 @@ class GeminiProvider:
             time.sleep(self._min_interval - elapsed)
         self._last_request = time.monotonic()
 
-    def _back_off(self, attempt: int, retry_after: str | None = None) -> None:
-        if retry_after is not None:
-            try:
-                time.sleep(min(float(retry_after), 120.0))
-                return
-            except ValueError:
-                pass
-        time.sleep(min(2.0**attempt, 60.0))
+    def _back_off(self, attempt: int, kind: str = "network") -> None:
+        """Wait before retrying, for a length that suits what went wrong.
+
+        Treating every transient failure the same was wrong in a way that only
+        showed up against a busy model: two seconds is a reasonable pause after
+        a dropped connection and no pause at all for a service that has just
+        said it is overloaded. A retry that arrives before the cause has
+        cleared is an extra request on a service already struggling.
+        """
+        schedule = _BACKOFF.get(kind, _BACKOFF["network"])
+        time.sleep(schedule[min(attempt, len(schedule)) - 1])
+
+    @staticmethod
+    def _retry_after(response: httpx.Response) -> float | None:
+        """The wait the server asked for, when it asked for one.
+
+        A 429 usually carries this, and obeying it beats guessing: the server
+        knows when the window resets and this code does not.
+        """
+        header = response.headers.get("Retry-After")
+        if header is None:
+            return None
+        try:
+            return min(float(header), 120.0)
+        except ValueError:
+            return None
 
     def close(self) -> None:
         self._client.close()
