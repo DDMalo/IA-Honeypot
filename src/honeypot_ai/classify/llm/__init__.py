@@ -6,6 +6,7 @@ from honeypot_ai.classify.llm.classifier import (
     ParseError,
     extract_json,
 )
+from honeypot_ai.classify.llm.gemini import GeminiProvider, response_schema
 from honeypot_ai.classify.llm.prompt import SYSTEM_PROMPT, build_user_prompt
 from honeypot_ai.classify.llm.provider import (
     CallableProvider,
@@ -18,6 +19,7 @@ from honeypot_ai.classify.llm.schema import SessionClassification
 __all__ = [
     "SYSTEM_PROMPT",
     "CallableProvider",
+    "GeminiProvider",
     "LlmClassifier",
     "LlmStats",
     "ParseError",
@@ -27,4 +29,5 @@ __all__ = [
     "StubProvider",
     "build_user_prompt",
     "extract_json",
+    "response_schema",
 ]
