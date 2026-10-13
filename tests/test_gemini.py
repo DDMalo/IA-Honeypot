@@ -20,7 +20,11 @@ import httpx
 import pytest
 
 from honeypot_ai.classify.llm.gemini import GeminiProvider, response_schema
-from honeypot_ai.classify.llm.provider import Provider, ProviderError
+from honeypot_ai.classify.llm.provider import (
+    PermanentProviderError,
+    Provider,
+    ProviderError,
+)
 from honeypot_ai.classify.taxonomy import Behaviour, Intent, Operator
 
 ANSWER = {
@@ -232,3 +236,72 @@ def test_available_models_are_reported_without_their_prefix() -> None:
     provider = provider_returning(httpx.Response(200, json=payload))
 
     assert provider.list_models() == ["gemini-a", "gemini-b"]
+
+
+# --- A retired model, which is what actually happened ----------------------
+
+
+def test_a_retired_model_is_permanent_and_says_what_to_do() -> None:
+    """The real 404: the name was valid when it was written and is not now."""
+    body = {
+        "error": {
+            "code": 404,
+            "message": (
+                "This model models/gemini-2.0-flash is no longer available. "
+                "Please update your code to use models/gemini-3.8-flash."
+            ),
+        }
+    }
+    provider = provider_returning(httpx.Response(404, json=body))
+
+    with pytest.raises(PermanentProviderError) as caught:
+        provider.complete("s", "u")
+
+    message = str(caught.value)
+    assert "gemini-3.8-flash" in message, "the replacement model must survive"
+    assert "--models" in message, "and the way to find it for oneself"
+    assert len(provider.requests) == 1, "retrying a retired model is pointless"  # type: ignore[attr-defined]
+
+
+def test_a_rejected_key_is_permanent_too() -> None:
+    provider = provider_returning(httpx.Response(401, json={"error": {"message": "bad key"}}))
+    with pytest.raises(PermanentProviderError):
+        provider.complete("s", "u")
+
+
+def test_a_missing_key_is_permanent() -> None:
+    with pytest.raises(PermanentProviderError):
+        GeminiProvider(api_key="")
+
+
+def test_a_malformed_request_is_not_retried() -> None:
+    provider = provider_returning(httpx.Response(400, json={"error": {"message": "bad field"}}))
+    with pytest.raises(PermanentProviderError, match="bad field"):
+        provider.complete("s", "u")
+    assert len(provider.requests) == 1  # type: ignore[attr-defined]
+
+
+def test_a_rate_limit_stays_transient_and_is_retried() -> None:
+    """Permanence is the exception; a 429 really does pass."""
+    provider = provider_returning(
+        httpx.Response(429, headers={"Retry-After": "0"}),
+        httpx.Response(200, json=generate_content(json.dumps(ANSWER))),
+    )
+    assert json.loads(provider.complete("s", "u"))["intent"] == "fingerprinting"
+
+
+def test_the_error_body_is_reduced_to_its_message() -> None:
+    """Dumping the envelope buried the sentence naming the replacement model."""
+    body = {"error": {"code": 400, "message": "a\n\n   b   c"}}
+    provider = provider_returning(httpx.Response(400, json=body))
+
+    with pytest.raises(PermanentProviderError) as caught:
+        provider.complete("s", "u")
+    assert "a b c" in str(caught.value)
+    assert '"code"' not in str(caught.value)
+
+
+def test_a_non_json_error_body_still_produces_something_readable() -> None:
+    provider = provider_returning(httpx.Response(400, text="<html>  gateway\n error </html>"))
+    with pytest.raises(PermanentProviderError, match="gateway error"):
+        provider.complete("s", "u")

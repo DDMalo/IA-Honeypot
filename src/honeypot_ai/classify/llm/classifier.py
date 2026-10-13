@@ -19,7 +19,11 @@ from pydantic import ValidationError
 
 from honeypot_ai.classify.facts import SessionFacts
 from honeypot_ai.classify.llm.prompt import SYSTEM_PROMPT, build_user_prompt
-from honeypot_ai.classify.llm.provider import Provider, ProviderError
+from honeypot_ai.classify.llm.provider import (
+    PermanentProviderError,
+    Provider,
+    ProviderError,
+)
 from honeypot_ai.classify.llm.schema import SessionClassification
 from honeypot_ai.classify.taxonomy import Intent, Label, Operator
 
@@ -106,6 +110,12 @@ class LlmClassifier:
 
             try:
                 reply = self.provider.complete(SYSTEM_PROMPT, user_prompt)
+            except PermanentProviderError as exc:
+                # Nothing a retry can do. Stop here so the one useful line is
+                # not repeated once per attempt, once per session.
+                self.stats.unavailable += 1
+                logger.error("%s", exc)
+                return self.unclassified(facts.session_id, str(exc))
             except ProviderError as exc:
                 last_problem = f"provider unavailable: {exc}"
                 logger.warning("%s on %s", last_problem, facts.session_id)
