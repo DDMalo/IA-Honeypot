@@ -424,6 +424,31 @@ The first prints the distribution across intents and behaviours, the mean rule c
 
 The second is the one worth reading. It prints sessions where no rule matched anything, which are either a gap in the rules or a gap in the taxonomy. Only reading them tells you which.
 
+### Trying the language model
+
+The rule engine is the baseline; this is the thing that has to beat it. Get a key at [aistudio.google.com](https://aistudio.google.com/apikey) and put it in `.env` as `GEMINI_API_KEY`.
+
+Model names and free-tier limits both change, so start by asking which models the key can actually reach:
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+python -m honeypot_ai.classify.llm --models
+```
+
+If the default is not in that list, set `GEMINI_MODEL` in `.env` to one that is. Then try it on a few real sessions:
+
+```bash
+python -m honeypot_ai.classify.llm --sample 5
+```
+
+Nothing is written. It prints each session's commands, the rule engine's answer and the model's, side by side, marking the ones where they disagree — which are the only interesting rows. Sessions are sampled from the ones that got past a single command, because a random sample would be nine `uname` probes out of ten.
+
+Requests are paced at one every four seconds, which is a conservative floor rather than a claim about the current quota. If the API starts answering 429, check Google's own documentation for the limits that apply to your key.
+
+Expect disagreements, and expect some of them to be the model being right. That is the point of building it. The measured version of this comparison — with a labelled set and real metrics — is v0.5.0.
+
 ## Retention
 
 Captured sessions contain IP addresses, which are personal data. Keeping them indefinitely needs a justification, so retention is enforced rather than intended. The reasoning, and what is kept where, is in [`docs/privacy.md`](../../docs/privacy.md).
