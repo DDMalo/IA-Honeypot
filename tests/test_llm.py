@@ -302,3 +302,14 @@ def test_a_permanent_provider_error_stops_after_one_attempt() -> None:
     assert label.notes == "unclassified: no such model"
     assert len(provider.calls) == 1
     assert classifier.stats.retried == 0
+
+
+def test_the_prompt_says_downloads_cannot_succeed_on_this_sensor() -> None:
+    """A model told nothing about egress reports attempts as completed actions.
+
+    Observed: a session whose only download was a blocked `wget` came back
+    described as having "downloaded a payload script". Substantively right,
+    and wrong in the one way that matters when the sentence is quoted.
+    """
+    assert "blocks outbound traffic" in SYSTEM_PROMPT
+    assert "attempts rather than as completed actions" in SYSTEM_PROMPT

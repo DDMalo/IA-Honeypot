@@ -161,7 +161,12 @@ RULES: tuple[Rule, ...] = (
     # ---- Staging ---------------------------------------------------------
     _rule(
         Behaviour.WRITABLE_DIR_HUNT,
-        r">\s*/\S*/?\.\w+\s*&&\s*chmod",
+        # Two shapes of the same idea: writing a probe file into each
+        # candidate directory, or walking a list of them with `cd a || cd b`
+        # until one works. The second was missed until a real session showed
+        # it, which is the argument for writing patterns against captures
+        # rather than against what one imagines attackers type.
+        r">\s*/\S*/?\.\w+\s*&&\s*chmod|cd\s+/\S*[^|]*\|\|\s*cd\s+/",
         Intent.STAGING,
         "hunting for somewhere both writable and executable",
     ),
@@ -176,6 +181,12 @@ RULES: tuple[Rule, ...] = (
         r"chmod\s+\+x\s+\S+\s*&&\s*\./|printf\s+[\"']#!/bin/",
         Intent.STAGING,
         "writes a throwaway script and runs it to prove execution works",
+    ),
+    _rule(
+        Behaviour.PAYLOAD_EXECUTION,
+        r"\b(sh|bash|ash)\s+\S*\.sh\b|\./\S+\.(sh|bin)\b",
+        Intent.STAGING,
+        "running what was just fetched",
     ),
     _rule(
         Behaviour.PAYLOAD_DOWNLOAD,
