@@ -29,17 +29,19 @@ from typing import Any, Self
 
 import httpx
 
-from honeypot_ai.classify.llm.provider import ProviderError
+from honeypot_ai.classify.llm.provider import PermanentProviderError, ProviderError
 from honeypot_ai.classify.taxonomy import Behaviour, Intent, Operator
 
 logger = logging.getLogger(__name__)
 
 API_ROOT = "https://generativelanguage.googleapis.com/v1beta"
 
-#: Checked against the models your key can actually reach — availability and
-#: naming change often enough that hardcoding one is a trap. `list_models()`
-#: reports what is available; `GEMINI_MODEL` overrides this.
-DEFAULT_MODEL = "gemini-2.0-flash"
+#: Pinned rather than an alias like `gemini-flash-latest`: a benchmark whose
+#: model silently changes underneath it is not a benchmark. The cost is that
+#: this name will eventually be retired — it has happened to this project
+#: once already — so `list_models()` reports what the key can reach and
+#: `GEMINI_MODEL` overrides this without a code change.
+DEFAULT_MODEL = "gemini-3.8-flash"
 
 #: Free-tier limits move, so this is a conservative floor rather than a claim
 #: about the current quota: four seconds between requests is fifteen a minute.
@@ -101,7 +103,7 @@ class GeminiProvider:
     ) -> None:
         key = api_key if api_key is not None else os.getenv("GEMINI_API_KEY", "")
         if not key:
-            raise ProviderError("No Gemini API key. Set GEMINI_API_KEY in .env.")
+            raise PermanentProviderError("No Gemini API key. Set GEMINI_API_KEY in .env.")
 
         self._model = model or os.getenv("GEMINI_MODEL") or DEFAULT_MODEL
         self._min_interval = min_interval
@@ -159,7 +161,14 @@ class GeminiProvider:
                 continue
 
             if response.status_code in (httpx.codes.UNAUTHORIZED, httpx.codes.FORBIDDEN):
-                raise ProviderError("Gemini rejected the API key")
+                raise PermanentProviderError("Gemini rejected the API key")
+
+            if response.status_code == httpx.codes.NOT_FOUND:
+                raise PermanentProviderError(
+                    f"Gemini has no model {self._model!r}: {_api_message(response)}. "
+                    "Run `python -m honeypot_ai.classify.llm --models` to see what "
+                    "this key can reach, then set GEMINI_MODEL in .env."
+                )
 
             if response.status_code >= httpx.codes.INTERNAL_SERVER_ERROR:
                 if attempt == MAX_ATTEMPTS:
@@ -168,8 +177,10 @@ class GeminiProvider:
                 continue
 
             if response.status_code != httpx.codes.OK:
-                raise ProviderError(
-                    f"Gemini returned {response.status_code}: {response.text[:200]}"
+                # A 4xx not covered above is a malformed request: sending it
+                # again changes nothing.
+                raise PermanentProviderError(
+                    f"Gemini returned {response.status_code}: {_api_message(response)}"
                 )
 
             return _extract_text(response.json())
@@ -221,6 +232,26 @@ class GeminiProvider:
         tb: TracebackType | None,
     ) -> None:
         self.close()
+
+
+def _api_message(response: httpx.Response) -> str:
+    """The one useful sentence out of an error body.
+
+    Google returns a nested JSON error whose `message` says what is wrong; the
+    rest is envelope. Dumping the raw body instead produced a wall of repeated
+    JSON the first time a model name went stale here, with the sentence that
+    named the replacement model cut off halfway.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        return " ".join(response.text.split())[:200]
+
+    error = payload.get("error") if isinstance(payload, dict) else None
+    message = error.get("message") if isinstance(error, dict) else None
+    if isinstance(message, str) and message:
+        return " ".join(message.split())[:300]
+    return " ".join(response.text.split())[:200]
 
 
 def _extract_text(payload: dict[str, Any]) -> str:

@@ -18,7 +18,20 @@ from typing import Protocol, runtime_checkable
 
 
 class ProviderError(RuntimeError):
-    """The backend could not be reached, or refused the request."""
+    """The backend could not be reached, or refused the request.
+
+    Transient by default: the classifier will retry.
+    """
+
+
+class PermanentProviderError(ProviderError):
+    """The request will fail identically however many times it is sent.
+
+    A rejected key, a retired model, a malformed request. Retrying these wastes
+    time and buries the one line that says what to fix under repeated copies of
+    the same error — which is exactly what happened the first time a model name
+    went stale in this project.
+    """
 
 
 @runtime_checkable

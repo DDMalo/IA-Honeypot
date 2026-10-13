@@ -24,7 +24,11 @@ from honeypot_ai.classify.llm.prompt import (
     SYSTEM_PROMPT,
     build_user_prompt,
 )
-from honeypot_ai.classify.llm.provider import ProviderError, StubProvider
+from honeypot_ai.classify.llm.provider import (
+    PermanentProviderError,
+    ProviderError,
+    StubProvider,
+)
 from honeypot_ai.classify.llm.schema import MAX_RATIONALE_CHARS, SessionClassification
 from honeypot_ai.classify.taxonomy import Behaviour, Intent, Operator
 
@@ -286,3 +290,15 @@ def test_every_taxonomy_label_is_offered_to_the_model() -> None:
         assert intent.value in SYSTEM_PROMPT
     for operator in Operator:
         assert operator.value in SYSTEM_PROMPT
+
+
+def test_a_permanent_provider_error_stops_after_one_attempt() -> None:
+    """A retired model or a bad key fails identically every time; say it once."""
+    provider = StubProvider(PermanentProviderError("no such model"), reply())
+    classifier = LlmClassifier(provider)
+    label = classifier.classify(facts("uname -a"))
+
+    assert label.intent is Intent.OTHER
+    assert label.notes == "unclassified: no such model"
+    assert len(provider.calls) == 1
+    assert classifier.stats.retried == 0

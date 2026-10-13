@@ -437,7 +437,11 @@ set -a && . ./.env && set +a
 python -m honeypot_ai.classify.llm --models
 ```
 
-If the default is not in that list, set `GEMINI_MODEL` in `.env` to one that is. Then try it on a few real sessions:
+If the default is not in that list, set `GEMINI_MODEL` in `.env` to one that is — which will happen, because Google retires model names. It has happened to this project once already: the default was valid when it was written and returned a 404 a few months later. The failure is deliberately loud and says which model to use instead.
+
+The default is a pinned name rather than an alias like `gemini-flash-latest`, because a benchmark whose model changes underneath it is not a benchmark. The trade-off is this maintenance.
+
+Then try it on a few real sessions:
 
 ```bash
 python -m honeypot_ai.classify.llm --sample 5
