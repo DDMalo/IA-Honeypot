@@ -7,6 +7,7 @@ from honeypot_ai.classify.llm.classifier import (
     extract_json,
 )
 from honeypot_ai.classify.llm.gemini import GeminiProvider, response_schema
+from honeypot_ai.classify.llm.ollama import OllamaProvider
 from honeypot_ai.classify.llm.prompt import SYSTEM_PROMPT, build_user_prompt
 from honeypot_ai.classify.llm.provider import (
     CallableProvider,
@@ -22,6 +23,7 @@ __all__ = [
     "GeminiProvider",
     "LlmClassifier",
     "LlmStats",
+    "OllamaProvider",
     "ParseError",
     "Provider",
     "ProviderError",
