@@ -457,6 +457,53 @@ Requests are paced at one every four seconds, which is a conservative floor rath
 
 Expect disagreements, and expect some of them to be the model being right. That is the point of building it. The measured version of this comparison — with a labelled set and real metrics — is v0.5.0.
 
+### Running a model locally
+
+The hosted model answered eight of ten requests in the first real run; the other two were Google saying it was busy. That is the number this is here to be compared against. A model on your own hardware has no quota, no queue and no vendor, it cannot decline to look at malware because a safety filter fired, and it is the only version of this pipeline where attacker data never leaves the homelab.
+
+It will be slower, and probably less accurate. Those are the trade-offs worth measuring rather than assuming.
+
+**The hardware decides the model.** This machine has 3.2 GB of RAM and no GPU, and is already running PostgreSQL and Grafana, which leaves about 2.5 GB free. Check before pulling anything:
+
+```bash
+free -h
+```
+
+The `available` column is the number that matters. Roughly, for four-bit quantised models: 0.5B needs about 0.5 GB, 1.5B about 1.2 GB, 3B about 2.2 GB. On this host that makes 1.5B the sensible starting point and 3B the ceiling — and 3B leaves so little headroom that PostgreSQL becomes the fattest process on the machine, which is exactly what the kernel kills when memory runs out. The container is capped at 2 GB for that reason.
+
+A model that does not fit does not run slowly. It swaps, and effectively stops. Start small and measure.
+
+```bash
+cd ~/IA-Honeypot/deploy/homelab
+docker compose --profile llm up -d ollama
+docker compose exec ollama ollama pull qwen2.5:1.5b
+```
+
+Ollama is behind a profile, so it stays off unless asked for: it is something to turn on when you want it, not something competing for memory all day. It binds to loopback only, like everything else here — a model endpoint with no authentication has no business on the home network.
+
+Then point the comparison at it:
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+python -m honeypot_ai.classify.llm --provider ollama --models
+python -m honeypot_ai.classify.llm --provider ollama --sample 10 --seed 1
+```
+
+### Comparing the two fairly
+
+`--seed` is what makes it a comparison rather than two unrelated samples:
+
+```bash
+python -m honeypot_ai.classify.llm --provider gemini --sample 10 --seed 1
+python -m honeypot_ai.classify.llm --provider ollama --sample 10 --seed 1
+```
+
+Both runs get the same ten sessions, the same prompt, the same parser and the same validation, so a difference in the numbers is a difference between the models. Three figures come out of each run — availability, median latency and agreement with the rules — and the honest summary needs all three. A model that is right whenever it answers and answers half the time is not better than one that is slightly worse and always answers; which is preferable depends on what the pipeline is for, and saying so is part of the result.
+
+Record what you measure, including the models that were too slow to use. "A 7B model took four minutes per session on this laptop" is a finding, and it is the sort of thing nobody publishes and everybody rediscovers.
+
 ## Retention
 
 Captured sessions contain IP addresses, which are personal data. Keeping them indefinitely needs a justification, so retention is enforced rather than intended. The reasoning, and what is kept where, is in [`docs/privacy.md`](../../docs/privacy.md).
