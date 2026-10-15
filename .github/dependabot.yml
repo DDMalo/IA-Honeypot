@@ -1,5 +1,12 @@
 # Dependabot checks weekly for outdated or vulnerable dependencies
 # and opens pull requests against the develop branch.
+#
+# Everything is grouped. Ungrouped, each dependency gets its own pull request,
+# and since they all edit the same two lines of pyproject.toml, merging the
+# first one puts every other into conflict — which turns a five-minute chore
+# into an afternoon of rebasing a bot's branches. Grouping trades the ability
+# to merge one update in isolation for updates that do not fight each other,
+# which on a project this size is the right way round.
 version: 2
 updates:
   - package-ecosystem: pip
@@ -12,8 +19,14 @@ updates:
     labels: ["dependencies"]
     open-pull-requests-limit: 5
     groups:
+      # Separate from the rest on purpose: a new ruff or mypy can flag code
+      # that passed yesterday, so when CI goes red it should be obvious
+      # whether the cause was a linter or a library.
       dev-tools:
         patterns: ["pytest*", "ruff", "mypy", "pre-commit"]
+      runtime:
+        patterns: ["*"]
+        exclude-patterns: ["pytest*", "ruff", "mypy", "pre-commit"]
 
   - package-ecosystem: github-actions
     directory: "/"
@@ -23,3 +36,6 @@ updates:
     commit-message:
       prefix: "chore(deps)"
     labels: ["dependencies"]
+    groups:
+      actions:
+        patterns: ["*"]
