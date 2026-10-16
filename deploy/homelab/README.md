@@ -502,7 +502,11 @@ python -m honeypot_ai.classify.llm --provider ollama --sample 10 --seed 1
 
 Both runs get the same ten sessions, the same prompt, the same parser and the same validation, so a difference in the numbers is a difference between the models. Three figures come out of each run — availability, median latency and agreement with the rules — and the honest summary needs all three. A model that is right whenever it answers and answers half the time is not better than one that is slightly worse and always answers; which is preferable depends on what the pipeline is for, and saying so is part of the result.
 
-**If answers come back as "reply was not JSON: unterminated string",** the model is being cut off rather than writing badly: a small model given no length limit writes a rationale until it runs out of tokens. The schema caps the rationale and the prompt asks for one short sentence, and Ollama's own `done_reason` is checked so a truncated answer says so instead of surfacing as a JSON error three layers away.
+**If answers come back truncated,** the model is being cut off rather than writing badly, and the error now says so and quotes what it had written — because a model rambling and a model looping look identical from the outside and need different fixes.
+
+Both are guarded against. The rationale has a length cap and the prompt asks for one short sentence; the behaviour list has a ceiling, because an array with no bound lets a grammar-constrained model repeat enum values indefinitely. The token limit is deliberately tight: a correct answer is about a hundred tokens, so raising the limit never fixes a loop, it only pays for more of it.
+
+Truncation is treated as permanent rather than retried. Generation runs at temperature zero, so an identical request returns an identical answer — retrying a deterministic failure costs another minute and a half to arrive at the same place.
 
 Record what you measure, including the models that were too slow to use. "A 7B model took four minutes per session on this laptop" is a finding, and it is the sort of thing nobody publishes and everybody rediscovers.
 

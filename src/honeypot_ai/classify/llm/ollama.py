@@ -51,9 +51,14 @@ DEFAULT_TIMEOUT = 300.0
 
 MAX_ATTEMPTS = 2
 
-#: Headroom over what a well-behaved answer needs. The real defence against
-#: truncation is the length cap on the rationale, not this.
-MAX_OUTPUT_TOKENS = 768
+#: Deliberately tight. A correct answer is about a hundred tokens, so this is
+#: ample for one — and when a model loops instead, it is cut off in twenty
+#: seconds rather than three minutes. Raising it does not fix a loop, it just
+#: pays for more of it.
+MAX_OUTPUT_TOKENS = 300
+
+#: No session in this corpus genuinely exhibits more than a handful.
+MAX_BEHAVIOURS = 8
 
 #: Matches the cap the shared validator applies, so the model is asked for
 #: what will survive validation rather than for more than it can keep.
@@ -77,6 +82,11 @@ def response_schema() -> dict[str, Any]:
             "intent": {"type": "string", "enum": [intent.value for intent in Intent]},
             "behaviours": {
                 "type": "array",
+                # Bounded. An array with no ceiling lets a grammar-constrained
+                # model repeat enum values indefinitely, which is the likelier
+                # way a 1.5B model fills 768 tokens: not a long sentence, a
+                # list that never ends. No session needs eight behaviours.
+                "maxItems": MAX_BEHAVIOURS,
                 "items": {
                     "type": "string",
                     "enum": [behaviour.value for behaviour in Behaviour],
@@ -208,9 +218,15 @@ def _extract_text(payload: dict[str, Any]) -> str:
     the point where it is still obvious.
     """
     if payload.get("done_reason") == "length":
-        raise ProviderError(
-            f"Ollama stopped at the {MAX_OUTPUT_TOKENS}-token ceiling; the answer "
-            "was cut off. The model is writing more than it was asked for."
+        # Permanent rather than transient: generation is at temperature zero,
+        # so an identical request produces an identical answer. Retrying costs
+        # another minute and a half to arrive at the same place.
+        message = payload.get("message")
+        partial = message.get("content", "") if isinstance(message, dict) else ""
+        snippet = " ".join(str(partial).split())[:300]
+        raise PermanentProviderError(
+            f"Ollama hit the {MAX_OUTPUT_TOKENS}-token ceiling and was cut off. "
+            f"It had written: {snippet}"
         )
 
     message = payload.get("message")
