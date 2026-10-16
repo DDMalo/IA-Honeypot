@@ -16,10 +16,12 @@ import pytest
 from honeypot_ai.classify.llm.gemini import GeminiProvider
 from honeypot_ai.classify.llm.ollama import (
     DEFAULT_MODEL,
+    MAX_RATIONALE_CHARS,
     OllamaProvider,
     response_schema,
 )
 from honeypot_ai.classify.llm.provider import PermanentProviderError, Provider, ProviderError
+from honeypot_ai.classify.llm.schema import MAX_RATIONALE_CHARS as SCHEMA_MAX_RATIONALE
 from honeypot_ai.classify.taxonomy import Behaviour, Intent, Operator
 
 ANSWER = {
@@ -167,3 +169,45 @@ def test_installed_models_are_listed_by_their_tags() -> None:
     payload = {"models": [{"name": "qwen2.5:1.5b"}, {"name": "llama3.2:3b"}]}
     provider = provider_returning(httpx.Response(200, json=payload))
     assert provider.list_models() == ["qwen2.5:1.5b", "llama3.2:3b"]
+
+
+# --- Truncation, which is what the first real run actually hit -------------
+#
+# Eight of ten sessions came back as "reply was not JSON: unterminated string
+# at column 2043". The model was not producing bad JSON; it was producing good
+# JSON that the token ceiling cut in half, because nothing limited how long a
+# rationale it could write.
+
+
+def test_the_rationale_is_length_capped_in_the_schema() -> None:
+    """The cap is the fix. More tokens would only buy a longer ramble."""
+    rationale = response_schema()["properties"]["rationale"]
+    assert rationale["maxLength"] == MAX_RATIONALE_CHARS
+
+
+def test_the_cap_matches_what_validation_would_keep() -> None:
+    """Asking for more than the validator stores would waste the tokens."""
+    assert MAX_RATIONALE_CHARS <= SCHEMA_MAX_RATIONALE
+
+
+def test_hitting_the_token_ceiling_is_reported_as_itself() -> None:
+    """Not as a JSON error three layers away, where it reads as the model's fault."""
+    payload = {
+        "message": {"role": "assistant", "content": '{"intent": "staging", "rational'},
+        "done": True,
+        "done_reason": "length",
+    }
+    provider = provider_returning(httpx.Response(200, json=payload))
+
+    with pytest.raises(ProviderError, match="cut off"):
+        provider.complete("s", "u")
+
+
+def test_a_normal_stop_is_not_mistaken_for_truncation() -> None:
+    payload = {
+        "message": {"role": "assistant", "content": json.dumps(ANSWER)},
+        "done": True,
+        "done_reason": "stop",
+    }
+    provider = provider_returning(httpx.Response(200, json=payload))
+    assert json.loads(provider.complete("s", "u"))["intent"] == "staging"

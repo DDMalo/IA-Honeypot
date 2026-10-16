@@ -87,6 +87,9 @@ Answer with a JSON object and nothing else:
 {{"intent": "...", "behaviours": ["..."], "operator": "...", \
 "confidence": 0.0, "rationale": "one sentence"}}
 
+Keep the rationale to a single short sentence of at most 25 words. It is a \
+note, not a report, and a long one will be cut off.
+
 Use only the intents and behaviours listed above. If a session fits none of \
 them, answer "other" rather than inventing a label.
 

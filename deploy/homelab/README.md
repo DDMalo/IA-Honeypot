@@ -502,6 +502,8 @@ python -m honeypot_ai.classify.llm --provider ollama --sample 10 --seed 1
 
 Both runs get the same ten sessions, the same prompt, the same parser and the same validation, so a difference in the numbers is a difference between the models. Three figures come out of each run — availability, median latency and agreement with the rules — and the honest summary needs all three. A model that is right whenever it answers and answers half the time is not better than one that is slightly worse and always answers; which is preferable depends on what the pipeline is for, and saying so is part of the result.
 
+**If answers come back as "reply was not JSON: unterminated string",** the model is being cut off rather than writing badly: a small model given no length limit writes a rationale until it runs out of tokens. The schema caps the rationale and the prompt asks for one short sentence, and Ollama's own `done_reason` is checked so a truncated answer says so instead of surfacing as a JSON error three layers away.
+
 Record what you measure, including the models that were too slow to use. "A 7B model took four minutes per session on this laptop" is a finding, and it is the sort of thing nobody publishes and everybody rediscovers.
 
 ## Retention
