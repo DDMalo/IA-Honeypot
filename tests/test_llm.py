@@ -313,3 +313,8 @@ def test_the_prompt_says_downloads_cannot_succeed_on_this_sensor() -> None:
     """
     assert "blocks outbound traffic" in SYSTEM_PROMPT
     assert "attempts rather than as completed actions" in SYSTEM_PROMPT
+
+
+def test_the_prompt_asks_for_a_short_rationale() -> None:
+    """A small model told nothing about length writes until it is cut off."""
+    assert "at most 25 words" in SYSTEM_PROMPT

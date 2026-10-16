@@ -50,7 +50,14 @@ DEFAULT_MODEL = "qwen2.5:1.5b"
 DEFAULT_TIMEOUT = 300.0
 
 MAX_ATTEMPTS = 2
-MAX_OUTPUT_TOKENS = 512
+
+#: Headroom over what a well-behaved answer needs. The real defence against
+#: truncation is the length cap on the rationale, not this.
+MAX_OUTPUT_TOKENS = 768
+
+#: Matches the cap the shared validator applies, so the model is asked for
+#: what will survive validation rather than for more than it can keep.
+MAX_RATIONALE_CHARS = 200
 
 
 def response_schema() -> dict[str, Any]:
@@ -80,7 +87,11 @@ def response_schema() -> dict[str, Any]:
                 "enum": [operator.value for operator in Operator],
             },
             "confidence": {"type": "number"},
-            "rationale": {"type": "string"},
+            # Capped. Without a limit a small model writes until it runs out
+            # of tokens, and the reply arrives truncated mid-string — which
+            # looks like the model producing invalid JSON when in fact it was
+            # producing valid JSON that we cut in half.
+            "rationale": {"type": "string", "maxLength": MAX_RATIONALE_CHARS},
         },
         "required": ["intent", "behaviours", "operator", "confidence", "rationale"],
     }
@@ -188,7 +199,20 @@ class OllamaProvider:
 
 
 def _extract_text(payload: dict[str, Any]) -> str:
-    """Pull the model's text out of an `/api/chat` response."""
+    """Pull the model's text out of an `/api/chat` response.
+
+    A reply that hit the token ceiling is reported as such rather than handed
+    on to the parser. Truncated JSON fails with "unterminated string at column
+    2043", which reads like the model cannot produce JSON and is actually the
+    caller cutting a valid answer in half — a diagnosis worth getting right at
+    the point where it is still obvious.
+    """
+    if payload.get("done_reason") == "length":
+        raise ProviderError(
+            f"Ollama stopped at the {MAX_OUTPUT_TOKENS}-token ceiling; the answer "
+            "was cut off. The model is writing more than it was asked for."
+        )
+
     message = payload.get("message")
     if not isinstance(message, dict):
         raise ProviderError("Ollama returned no message")
