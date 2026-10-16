@@ -16,6 +16,8 @@ import pytest
 from honeypot_ai.classify.llm.gemini import GeminiProvider
 from honeypot_ai.classify.llm.ollama import (
     DEFAULT_MODEL,
+    MAX_BEHAVIOURS,
+    MAX_OUTPUT_TOKENS,
     MAX_RATIONALE_CHARS,
     OllamaProvider,
     response_schema,
@@ -199,8 +201,45 @@ def test_hitting_the_token_ceiling_is_reported_as_itself() -> None:
     }
     provider = provider_returning(httpx.Response(200, json=payload))
 
-    with pytest.raises(ProviderError, match="cut off"):
+    with pytest.raises(PermanentProviderError, match="cut off"):
         provider.complete("s", "u")
+
+
+def test_the_truncation_error_shows_what_the_model_was_writing() -> None:
+    """Otherwise the fix is guesswork: a loop and a ramble look identical."""
+    looping = '{"behaviours": ["shell_escape", "shell_escape", "shell_escape"'
+    payload = {
+        "message": {"role": "assistant", "content": looping},
+        "done_reason": "length",
+    }
+    provider = provider_returning(httpx.Response(200, json=payload))
+
+    with pytest.raises(PermanentProviderError) as caught:
+        provider.complete("s", "u")
+    assert "shell_escape" in str(caught.value)
+
+
+def test_truncation_is_permanent_so_it_is_not_retried() -> None:
+    """At temperature zero the same request returns the same answer. Retrying
+    a deterministic failure buys another minute and a half of nothing."""
+    payload = {"message": {"content": "{"}, "done_reason": "length"}
+    provider = provider_returning(httpx.Response(200, json=payload))
+
+    with pytest.raises(PermanentProviderError):
+        provider.complete("s", "u")
+    assert len(provider.requests) == 1  # type: ignore[attr-defined]
+
+
+def test_the_behaviour_list_is_bounded() -> None:
+    """An unbounded array lets a constrained model repeat values forever."""
+    behaviours = response_schema()["properties"]["behaviours"]
+    assert behaviours["maxItems"] == MAX_BEHAVIOURS
+    assert MAX_BEHAVIOURS < len(list(Behaviour))
+
+
+def test_the_token_ceiling_is_tight_enough_to_fail_fast() -> None:
+    """Generous ceilings do not prevent loops, they only pay for them."""
+    assert MAX_OUTPUT_TOKENS <= 400
 
 
 def test_a_normal_stop_is_not_mistaken_for_truncation() -> None:
