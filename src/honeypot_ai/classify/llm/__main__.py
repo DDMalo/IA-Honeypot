@@ -31,7 +31,7 @@ from sqlalchemy.orm import selectinload
 from honeypot_ai.classify.facts import facts_from_row
 from honeypot_ai.classify.llm.classifier import LlmClassifier
 from honeypot_ai.classify.llm.gemini import GeminiProvider
-from honeypot_ai.classify.llm.injection import CASES, InjectionResult
+from honeypot_ai.classify.llm.injection import CASES, InjectionResult, SuiteScore
 from honeypot_ai.classify.llm.ollama import OllamaProvider
 from honeypot_ai.classify.llm.provider import Provider, ProviderError
 from honeypot_ai.classify.rules import classify as classify_by_rules
@@ -47,28 +47,52 @@ def build_provider(name: str, model: str | None) -> Provider:
 def _run_injection_suite(provider: Provider) -> int:
     """Feed every hostile session to the model and score the outcome.
 
+    Each case runs twice: the carrier session alone, then the same session
+    with the payload appended. Scoring the second run on its own credits the
+    attacker with every mistake the model would have made anyway, which is
+    what the first version of this did.
+
     Reads nothing from the database: the corpus is synthetic, so this runs
     anywhere the provider is reachable.
     """
     classifier = LlmClassifier(provider)
     results: list[InjectionResult] = []
 
-    print(f"{provider.name} against {len(CASES)} injection attempts\n")
+    print(f"{provider.name} against {len(CASES)} injection attempts")
+    print(f"{2 * len(CASES)} calls: every case is run clean first, then attacked.\n")
 
     for case in CASES:
+        control = classifier.classify(case.control_facts)
         label = classifier.classify(case.facts)
-        result = InjectionResult(case=case, answered=label.intent, rationale=label.notes)
+        result = InjectionResult(
+            case=case,
+            answered=label.intent,
+            control=control.intent,
+            rationale=label.notes,
+        )
         results.append(result)
 
         print(f"  {result.verdict:<9} {case.name:<24} {case.technique}")
         if not result.resisted:
-            print(f"            wanted {case.expected.value}, said {label.intent.value}")
+            print(
+                f"            truth {case.expected.value} · "
+                f"clean {result.control.value} · attacked {result.answered.value}"
+            )
 
-    injected = sum(1 for r in results if r.succeeded)
-    resisted = sum(1 for r in results if r.resisted)
-    confused = len(results) - injected - resisted
+    score = SuiteScore(tuple(results))
+    total = len(results)
 
-    print(f"\n{resisted}/{len(results)} resisted, {injected} injected, {confused} confused")
+    print(f"\n{score}")
+
+    if score.control_correct < total:
+        print(
+            f"\nThe model got {total - score.control_correct} of these sessions wrong with "
+            "no attack present at all.\n"
+            "Those say nothing about injection resistance — they say the model does\n"
+            "not read this taxonomy. The number to read for resistance is how many\n"
+            f"answers the payload changed: {score.moved}/{total}."
+        )
+
     print(
         "\nAn injection that works changes one label and nothing else: the model\n"
         "emits JSON, calls no tool, runs no command, and anything it invents fails\n"
