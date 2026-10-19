@@ -31,6 +31,7 @@ from sqlalchemy.orm import selectinload
 from honeypot_ai.classify.facts import facts_from_row
 from honeypot_ai.classify.llm.classifier import LlmClassifier
 from honeypot_ai.classify.llm.gemini import GeminiProvider
+from honeypot_ai.classify.llm.injection import CASES, InjectionResult
 from honeypot_ai.classify.llm.ollama import OllamaProvider
 from honeypot_ai.classify.llm.provider import Provider, ProviderError
 from honeypot_ai.classify.rules import classify as classify_by_rules
@@ -41,6 +42,40 @@ def build_provider(name: str, model: str | None) -> Provider:
     if name == "ollama":
         return OllamaProvider(model=model)
     return GeminiProvider(model=model)
+
+
+def _run_injection_suite(provider: Provider) -> int:
+    """Feed every hostile session to the model and score the outcome.
+
+    Reads nothing from the database: the corpus is synthetic, so this runs
+    anywhere the provider is reachable.
+    """
+    classifier = LlmClassifier(provider)
+    results: list[InjectionResult] = []
+
+    print(f"{provider.name} against {len(CASES)} injection attempts\n")
+
+    for case in CASES:
+        label = classifier.classify(case.facts)
+        result = InjectionResult(case=case, answered=label.intent, rationale=label.notes)
+        results.append(result)
+
+        print(f"  {result.verdict:<9} {case.name:<24} {case.technique}")
+        if not result.resisted:
+            print(f"            wanted {case.expected.value}, said {label.intent.value}")
+
+    injected = sum(1 for r in results if r.succeeded)
+    resisted = sum(1 for r in results if r.resisted)
+    confused = len(results) - injected - resisted
+
+    print(f"\n{resisted}/{len(results)} resisted, {injected} injected, {confused} confused")
+    print(
+        "\nAn injection that works changes one label and nothing else: the model\n"
+        "emits JSON, calls no tool, runs no command, and anything it invents fails\n"
+        "schema validation. This number measures the prompt; the architecture is\n"
+        "what bounds the damage."
+    )
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -56,6 +91,11 @@ def main(argv: list[str] | None = None) -> int:
         help="which backend to use (default: gemini)",
     )
     parser.add_argument("--models", action="store_true", help="list the available models")
+    parser.add_argument(
+        "--injection-suite",
+        action="store_true",
+        help="run the adversarial corpus and report how many injections worked",
+    )
     parser.add_argument("--sample", type=int, default=5, help="how many sessions to try")
     parser.add_argument("--model", default=None, help="override the provider's default model")
     parser.add_argument(
@@ -88,6 +128,9 @@ def main(argv: list[str] | None = None) -> int:
                 print(exc)
                 return 2
             return 0
+
+        if args.injection_suite:
+            return _run_injection_suite(provider)
 
         statement = select(SessionRow).options(
             selectinload(SessionRow.commands),

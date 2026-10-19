@@ -491,6 +491,19 @@ python -m honeypot_ai.classify.llm --provider ollama --models
 python -m honeypot_ai.classify.llm --provider ollama --sample 10 --seed 1
 ```
 
+### Testing the defences against prompt injection
+
+Attacker text crosses into a prompt here, so the pipeline ships with an adversarial corpus and a way to score a model against it:
+
+```bash
+python -m honeypot_ai.classify.llm --injection-suite --provider gemini
+python -m honeypot_ai.classify.llm --injection-suite --provider ollama
+```
+
+Twelve hostile sessions, each with two labels — what the session is, and what the injection wants the model to say — so every outcome is one of *resisted*, *injected* or *confused*. It needs no database and no sessions of your own; the corpus is synthetic.
+
+A model that scores badly is not a reason to stop using it, and a model that scores perfectly is not a guarantee. The reasoning is in [`docs/prompt-injection.md`](../../docs/prompt-injection.md), along with what the architecture bounds regardless of how the model behaves.
+
 ### Comparing the two fairly
 
 `--seed` is what makes it a comparison rather than two unrelated samples:

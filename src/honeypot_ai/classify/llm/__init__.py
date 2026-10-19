@@ -7,6 +7,7 @@ from honeypot_ai.classify.llm.classifier import (
     extract_json,
 )
 from honeypot_ai.classify.llm.gemini import GeminiProvider, response_schema
+from honeypot_ai.classify.llm.injection import CASES, InjectionCase, InjectionResult
 from honeypot_ai.classify.llm.ollama import OllamaProvider
 from honeypot_ai.classify.llm.prompt import SYSTEM_PROMPT, build_user_prompt
 from honeypot_ai.classify.llm.provider import (
@@ -19,8 +20,11 @@ from honeypot_ai.classify.llm.schema import SessionClassification
 
 __all__ = [
     "SYSTEM_PROMPT",
+    "CASES",
     "CallableProvider",
     "GeminiProvider",
+    "InjectionCase",
+    "InjectionResult",
     "LlmClassifier",
     "LlmStats",
     "OllamaProvider",
