@@ -208,3 +208,11 @@ Two smaller fixes came with it. The filesystem pattern anchored to end-of-line, 
 ### Where this stops
 
 The remaining `other` is a long tail, and it stays that way. Writing a rule for each surviving session would produce a classifier that scores beautifully on this corpus and generalises to nothing — the rule engine's job is to be a fair baseline, not to win. Reaching the last fraction of a per cent by reading intent rather than matching strings is the work the language model is for, and the comparison is only honest if the baseline stops at a defensible point rather than being tuned until it looks good.
+
+## Where models disagree with the rules
+
+The first side-by-side run against a language model produced two disagreements out of three, and both were the same mistake: the model chose the **most prominent** behaviour rather than the **furthest point reached**. A session that surveys the hardware and then writes and executes a script came back as `resource_profiling`; one that ends in staging came back as `shell_probing`.
+
+That is the precedence rule not being applied, and it is worth recording here rather than only in the comparison, because it says something about the taxonomy and not only about the model: the rule is the single least intuitive thing in this document, and the one most likely to be got wrong by anybody — human or model — labelling quickly.
+
+It was deliberately not fixed by rewriting the prompt until the model agreed. The rule engine is the baseline being compared against, not the answer key, and tuning a classifier until it matches its own baseline measures imitation rather than skill. Which of the two is right on those sessions is a question for the labelled set in v0.5.0.
