@@ -508,7 +508,7 @@ Both are guarded against. The rationale has a length cap and the prompt asks for
 
 Truncation is treated as permanent rather than retried. Generation runs at temperature zero, so an identical request returns an identical answer — retrying a deterministic failure costs another minute and a half to arrive at the same place.
 
-Record what you measure, including the models that were too slow to use. "A 7B model took four minutes per session on this laptop" is a finding, and it is the sort of thing nobody publishes and everybody rediscovers.
+Record what you measure, including the models that were too slow to use. The first round is written up in [`docs/model-comparison.md`](../../docs/model-comparison.md): `qwen2.5:1.5b` runs here at about 23 seconds a session, `llama3.2:3b` does not run at all — 2.0 GB of weights on 2.5 GB of free memory is a machine swapping, not a model thinking. "A 7B model took four minutes per session on this laptop" is a finding, and it is the sort of thing nobody publishes and everybody rediscovers.
 
 ## Retention
 
