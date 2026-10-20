@@ -14,4 +14,19 @@ LicenseKey YOUR_LICENSE_KEY
 # two for attack analysis.
 EditionIDs GeoLite2-City GeoLite2-ASN
 
+# Must match ReadWritePaths in geolite-update.service. The service runs under
+# ProtectSystem=strict, so a directory that is not named there is read-only to
+# it however writable it looks from a shell. Change the two together.
 DatabaseDirectory /srv/honeypot/geoip
+
+# geoipupdate retries a failed download for five minutes by default, and every
+# retry fetches the whole database again — 64 MB for the City edition. When the
+# failure is local and permanent, such as a directory the process cannot write
+# to, that loop cannot succeed and costs a download from the free tier's daily
+# quota each time round. Observed: nine minutes of retries per run, the quota
+# exhausted, and then HTTP 429 for the rest of the day.
+#
+# Fail on the first attempt instead. A transient network error then means one
+# missed update rather than a day without one, and the staleness warning in the
+# enrichment worker is what makes sure a missed update gets noticed.
+RetryFor 0s
