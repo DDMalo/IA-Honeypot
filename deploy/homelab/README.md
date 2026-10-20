@@ -187,6 +187,11 @@ They are free but require an account, and their licence requires attribution (se
 
 ```bash
 sudo apt install -y geoipupdate
+
+# The package enables a scheduler of its own. Turn it off before going any
+# further — see "Two updaters are worse than one" below for why.
+sudo systemctl disable --now geoipupdate.timer
+
 sudo mkdir -p /srv/honeypot/geoip
 sudo chown david:david /srv/honeypot/geoip
 
@@ -203,6 +208,62 @@ sudo install -m 0644 geolite-update.service /etc/systemd/system/
 sudo install -m 0644 geolite-update.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now geolite-update.timer
+```
+
+Check that exactly one updater is scheduled. The two units are named
+differently, so a search for one will not show the other:
+
+```bash
+systemctl list-timers --all | grep -iE 'geoip|geolite'   # expect geolite-update.timer, alone
+```
+
+#### Two updaters are worse than one
+
+The `geoipupdate` package enables `geoipupdate.timer`, which does the same job
+as the timer above. Running both is not redundancy, it is a bug, and it took a
+fortnight and a warning email from MaxMind to notice here. Three things went
+wrong at once, and all three are worth knowing about:
+
+**They race for a lock.** `geoipupdate` takes a lock file in the database
+directory, and the loser exits immediately without retrying. On a machine that
+is switched off between sessions this happens every time: both timers miss
+their slot while the machine is off, `Persistent=true` fires both at boot, and
+they start within a second of each other. Four consecutive runs of this unit
+died that way with `lock ... already acquired by another process`.
+
+**The package's unit cannot write to a relocated database directory.** It runs
+under `ProtectSystem=strict` with `ReadWritePaths=/var/lib/GeoIP/`, the default
+location. This deployment keeps its databases in `/srv/honeypot/geoip`, so that
+unit downloads each database in full and then fails with `read-only file
+system` — a path that is perfectly writable from a shell and read-only inside
+its sandbox. The hardening is right; the assumption underneath it is what
+breaks, and it breaks in a file nobody edits when they change the directory.
+
+**Retrying made it expensive.** `geoipupdate` treats that write failure as
+transient and retries for five minutes, re-downloading the whole database each
+time. The free tier allows thirty downloads a day. Nine minutes of retrying
+exhausts it, and the rest of the day returns HTTP 429 — including to the unit
+that would have worked. `RetryFor 0s` in `GeoIP.conf.example` stops that.
+
+None of it produced an alert. Enrichment carried on, labelling every session
+with a country and a network from a file that was two weeks stale and getting
+staler. That is what the age check below exists for.
+
+#### Checking the data is fresh
+
+The worker reports the age of each database from the `build_epoch` in its own
+metadata — when MaxMind built it, not when the file landed on disk:
+
+```bash
+python -m honeypot_ai.enrich --limit 0
+```
+
+Over seven days old means at least two published updates were missed, which is
+an updater that has stopped rather than a quiet week:
+
+```bash
+systemctl status geolite-update.service
+journalctl -u geolite-update.service -n 20
 ```
 
 ### Running it

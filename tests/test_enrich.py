@@ -9,11 +9,20 @@ MaxMind's reader — the design choice and the testability are the same thing.
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
+import geoip2.errors
 import pytest
 
-from honeypot_ai.enrich.geoip import GeoInfo, GeoLite2Locator
+from honeypot_ai.enrich.geoip import (
+    CITY_DB,
+    MAX_DATABASE_AGE,
+    DatabaseAge,
+    GeoInfo,
+    GeoLite2Locator,
+)
 
 TEST_DB = os.getenv("TEST_DATABASE_URL")
 needs_db = pytest.mark.skipif(TEST_DB is None, reason="TEST_DATABASE_URL is not set")
@@ -61,6 +70,89 @@ def test_missing_databases_do_not_raise(tmp_path: Path) -> None:
     assert not locator.available
     assert locator.lookup("203.0.113.1").empty
     locator.close()
+
+
+# --- How old the data is ---------------------------------------------------
+#
+# Written after the updater failed silently on every run for a fortnight while
+# enrichment carried on producing confident answers from a frozen file. The
+# pipeline never errored; it just stopped being right, and nothing in it was
+# looking at that.
+
+NOON = datetime(2026, 10, 20, 12, 0, tzinfo=UTC)
+
+
+def built(days_ago: float) -> DatabaseAge:
+    return DatabaseAge(name=CITY_DB, built=NOON - timedelta(days=days_ago), checked=NOON)
+
+
+def test_a_fresh_database_is_not_stale() -> None:
+    """MaxMind publishes twice a week, so three days old is a healthy file."""
+    assert not built(3).stale
+
+
+def test_a_database_past_two_missed_publications_is_stale() -> None:
+    assert built(8).stale
+
+
+def test_the_threshold_allows_one_missed_publication_but_not_two() -> None:
+    """Tight enough to catch a dead updater, loose enough for a late run."""
+    assert MAX_DATABASE_AGE >= timedelta(days=4)
+    assert MAX_DATABASE_AGE <= timedelta(days=10)
+
+
+def test_age_is_measured_from_the_build_not_the_file() -> None:
+    """A copied or restored file gets a new mtime and the same stale data, so
+    mtime would report a two-week-old database as brand new."""
+    stale_data_in_a_fresh_file = DatabaseAge(
+        name=CITY_DB,
+        built=datetime(2026, 10, 5, 16, 4, tzinfo=UTC),
+        checked=NOON,
+    )
+    assert stale_data_in_a_fresh_file.age.days == 14
+    assert stale_data_in_a_fresh_file.stale
+
+
+def test_the_age_reads_as_a_sentence() -> None:
+    """It is printed into a journal somebody will be reading in a hurry."""
+    assert str(built(14)) == "GeoLite2-City.mmdb: built 2026-10-06, 14 day(s) old"
+
+
+def test_no_databases_means_nothing_to_report(tmp_path: Path) -> None:
+    """Absent is a different problem from stale, and `available` already says so."""
+    locator = GeoLite2Locator(tmp_path)
+
+    assert locator.ages() == ()
+    assert locator.stale_databases() == ()
+    locator.close()
+
+
+def test_staleness_is_reported_rather_than_raised(tmp_path: Path) -> None:
+    """Old data beats no data: the worker warns and carries on enriching."""
+    locator = GeoLite2Locator(tmp_path)
+    locator._city = _FrozenReader(datetime(2026, 1, 1, tzinfo=UTC))  # type: ignore[assignment]
+
+    stale = locator.stale_databases(now=NOON)
+
+    assert len(stale) == 1
+    assert stale[0].name == CITY_DB
+    assert locator.lookup("203.0.113.1").empty  # still answering
+
+
+class _FrozenReader:
+    """Just enough of geoip2's Reader to report a build date."""
+
+    def __init__(self, built: datetime) -> None:
+        self._built = built
+
+    def metadata(self) -> object:
+        return SimpleNamespace(build_epoch=int(self._built.timestamp()))
+
+    def city(self, ip: str) -> object:
+        raise geoip2.errors.AddressNotFoundError(ip)
+
+    def close(self) -> None:
+        return None
 
 
 @pytest.fixture
