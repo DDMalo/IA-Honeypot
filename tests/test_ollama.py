@@ -19,6 +19,7 @@ from honeypot_ai.classify.llm.ollama import (
     MAX_BEHAVIOURS,
     MAX_OUTPUT_TOKENS,
     MAX_RATIONALE_CHARS,
+    SEED,
     OllamaProvider,
     response_schema,
 )
@@ -250,3 +251,17 @@ def test_a_normal_stop_is_not_mistaken_for_truncation() -> None:
     }
     provider = provider_returning(httpx.Response(200, json=payload))
     assert json.loads(provider.complete("s", "u"))["intent"] == "staging"
+
+
+# --- Reproducibility -------------------------------------------------------
+
+
+def test_generation_is_seeded_so_two_runs_are_comparable() -> None:
+    """Temperature zero is not by itself reproducible. Two runs of the
+    injection suite gave different answers on two of twelve cases, which is
+    enough to move a published number without anyone noticing."""
+    provider = provider_returning(httpx.Response(200, json=chat_response(json.dumps(ANSWER))))
+    provider.complete("s", "u")
+
+    body = json.loads(provider.requests[0].content)  # type: ignore[attr-defined]
+    assert body["options"]["seed"] == SEED
