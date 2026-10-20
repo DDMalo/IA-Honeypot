@@ -60,6 +60,11 @@ MAX_OUTPUT_TOKENS = 300
 #: No session in this corpus genuinely exhibits more than a handful.
 MAX_BEHAVIOURS = 8
 
+#: Any fixed value would do; what matters is that it does not change between
+#: runs, so a number from last week and a number from today differ because the
+#: prompt changed rather than because the sampler did.
+SEED = 1
+
 #: Matches the cap the shared validator applies, so the model is asked for
 #: what will survive validation rather than for more than it can keep.
 MAX_RATIONALE_CHARS = 200
@@ -139,6 +144,12 @@ class OllamaProvider:
                 # Zero, as with the hosted model: the comparison must measure
                 # the model and not the sampler.
                 "temperature": 0,
+                # Temperature zero is not by itself reproducible. Two runs of
+                # the injection suite an hour apart gave different answers on
+                # two of twelve cases, which is enough to move a headline
+                # number and not enough to notice without checking. A fixed
+                # seed makes a re-run comparable to the one it is compared to.
+                "seed": SEED,
                 "num_predict": MAX_OUTPUT_TOKENS,
             },
         }
