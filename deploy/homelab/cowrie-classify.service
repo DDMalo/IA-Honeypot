@@ -1,0 +1,27 @@
+# Labels new sessions with the rule engine. Triggered by cowrie-classify.timer.
+#
+# Only the rules run on a timer. They are deterministic, cost nothing and take
+# milliseconds per session, so labelling everything as it arrives is free.
+#
+# The language-model classifiers are deliberately NOT scheduled. Gemini is
+# metered and Ollama takes twenty seconds a session on this hardware, so both
+# are run by hand over a bounded number of sessions:
+#
+#   python -m honeypot_ai.classify --classifier gemini --limit 200
+#
+# A timer that quietly spends a quota is a worse failure than a timer that
+# does not exist.
+
+[Unit]
+Description=Label honeypot sessions with the rule classifier
+Documentation=https://github.com/DDMalo/IA-Honeypot
+After=docker.service cowrie-ingest.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=david
+WorkingDirectory=/home/david/IA-Honeypot
+EnvironmentFile=/home/david/IA-Honeypot/.env
+ExecStart=/home/david/IA-Honeypot/.venv/bin/python -m honeypot_ai.classify --classifier rules
+TimeoutStartSec=900

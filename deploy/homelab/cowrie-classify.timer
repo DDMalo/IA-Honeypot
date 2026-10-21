@@ -1,0 +1,15 @@
+# Runs after ingestion, like enrichment. Classification never blocks capture:
+# a session is recorded first and labelled afterwards, so a broken classifier
+# costs labels rather than data.
+
+[Unit]
+Description=Label honeypot sessions every 30 minutes
+
+[Timer]
+OnBootSec=20min
+OnUnitActiveSec=30min
+RandomizedDelaySec=180s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

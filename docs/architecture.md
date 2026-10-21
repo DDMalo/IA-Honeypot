@@ -48,6 +48,24 @@ The homelab pulls the log over the tunnel, groups events into sessions, and stor
 
 Direction matters: the homelab always initiates. The sensor holds no credential that reaches into the home network, so a fully compromised sensor gains no foothold at home.
 
+### Classification writes several answers, not one
+
+`session_labels` is keyed by `(session_id, classifier)`, so the rule engine and
+each language model record their own conclusion about the same session, and a
+human analyst joins them as another classifier in v0.5.0 rather than needing a
+table of their own.
+
+Collapsing that to one label per session would be the obvious schema and the
+wrong one. Agreement between classifiers carries no information; the
+disagreement is the entire basis of the evaluation, and it has already been
+worth something once — a model found a complete dropper chain the rules had
+missed. A schema that stores a single answer cannot represent a disagreement,
+and the data is gone by the time anyone wants it.
+
+Each row also carries the `taxonomy_version` it was written under, so a change
+to the vocabulary marks the affected labels for relabelling instead of leaving
+a table that is silently a mixture of two schemes.
+
 ## Trust boundaries
 
 | Boundary | Assumption |

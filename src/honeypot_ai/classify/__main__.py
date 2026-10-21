@@ -1,46 +1,92 @@
-"""Run the rule engine over the stored sessions and report what it found.
+"""Classify stored sessions and record the labels.
 
-    python -m honeypot_ai.classify
-    python -m honeypot_ai.classify --unmatched 20
+    python -m honeypot_ai.classify --classifier rules
+    python -m honeypot_ai.classify --classifier gemini --limit 200
 
-**Nothing is written.** Storing classifications is a later card; this exists so
-the rules can be checked against the real corpus while they are being written,
-and so the baseline distribution is a number rather than an impression.
+Safe to re-run: a session already labelled by this classifier under the
+current taxonomy is skipped, so the rule engine can run on a timer every few
+minutes while a paid model is run deliberately over a bounded number of
+sessions.
 
-The figure to watch is not the headline distribution — on this data that is
-dominated by one class whatever the rules do — but the sessions where no rule
-matched. Those are either a gap in the rules or a gap in the taxonomy, and
-`--unmatched` prints them so the difference can be told by reading.
+Each classifier writes under its own name, and they do not overwrite each
+other. Running all three leaves three labels per session, which is the
+arrangement the evaluation in v0.5.0 needs.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
-from collections import Counter
+import os
+import sys
 
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
-
+from honeypot_ai.classify import rules
 from honeypot_ai.classify.facts import facts_from_row
-from honeypot_ai.classify.rules import classify
-from honeypot_ai.classify.taxonomy import Behaviour, Intent, Operator
-from honeypot_ai.db import SessionRow, session_factory
+from honeypot_ai.classify.llm.classifier import LlmClassifier
+from honeypot_ai.classify.llm.gemini import GeminiProvider
+from honeypot_ai.classify.llm.ollama import OllamaProvider
+from honeypot_ai.classify.taxonomy import TAXONOMY_VERSION
+from honeypot_ai.classify.worker import (
+    DEFAULT_BATCH_SIZE,
+    Classifier,
+    classify_sessions,
+    pending_sessions,
+)
+from honeypot_ai.db import session_factory
+
+#: The name the rule engine's labels are stored under. A plain word rather
+#: than a version string: the rules live in this repository, so `git log` is
+#: the version history, and `--reclassify` is how a change is applied.
+RULES = "rules"
+
+
+def build_classifier(kind: str, model: str | None) -> tuple[Classifier, str]:
+    """Return the classifier and the name its labels are stored under.
+
+    The name carries the model for anything hosted or local, so upgrading a
+    model starts a new series of labels instead of silently rewriting what the
+    previous one concluded.
+    """
+    if kind == RULES:
+        return rules.classify, RULES
+
+    provider = OllamaProvider(model=model) if kind == "ollama" else GeminiProvider(model=model)
+    return LlmClassifier(provider).classify, provider.name
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m honeypot_ai.classify",
-        description="Apply the rule engine to stored sessions and report the result. "
-        "Reads only; nothing is written.",
+        description="Label stored sessions with intent, behaviours and operator.",
     )
-    parser.add_argument("--limit", type=int, default=None, help="classify at most this many")
     parser.add_argument(
-        "--unmatched",
+        "--classifier",
+        choices=[RULES, "gemini", "ollama"],
+        default=RULES,
+        help="which classifier to run (default: rules)",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help="override the model, for the gemini and ollama classifiers",
+    )
+    parser.add_argument(
+        "--limit",
         type=int,
-        default=0,
-        metavar="N",
-        help="also print N sessions no rule recognised",
+        default=None,
+        help="label at most this many sessions, newest first",
+    )
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument(
+        "--reclassify",
+        action="store_true",
+        help="relabel sessions this classifier has already answered for, "
+        "for when the rules or the prompt changed rather than the taxonomy",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="classify and print, write nothing",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(argv)
@@ -50,69 +96,27 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(message)s",
     )
 
-    intents: Counter[Intent] = Counter()
-    behaviours: Counter[Behaviour] = Counter()
-    operators: Counter[Operator] = Counter()
-    coverage_total = 0.0
-    unmatched: list[tuple[str, tuple[str, ...]]] = []
-    total = 0
+    if args.classifier == "gemini" and not os.getenv("GEMINI_API_KEY"):
+        print("GEMINI_API_KEY is not set.", file=sys.stderr)
+        return 2
 
-    statement = select(SessionRow).options(
-        selectinload(SessionRow.commands),
-        selectinload(SessionRow.file_transfers),
-    )
-    if args.limit is not None:
-        statement = statement.limit(args.limit)
+    classifier, name = build_classifier(args.classifier, args.model)
 
     with session_factory()() as db:
-        for row in db.scalars(statement).all():
-            facts = facts_from_row(row)
-            label = classify(facts)
+        rows = pending_sessions(db, name, args.limit, reclassify=args.reclassify)
+        print(f"{name}, taxonomy v{TAXONOMY_VERSION}: {len(rows)} session(s) to label")
 
-            total += 1
-            intents[label.intent] += 1
-            operators[label.operator] += 1
-            behaviours.update(label.behaviours)
-            coverage_total += label.confidence or 0.0
+        if args.dry_run:
+            for row in rows:
+                label = classifier(facts_from_row(row))
+                behaviours = ", ".join(sorted(str(b) for b in label.behaviours)) or "—"
+                print(f"  {row.session_id}  {label.intent}  [{behaviours}]")
+            print(f"\nDry run: {len(rows)} session(s) classified, nothing written.")
+            return 0
 
-            if not label.behaviours and facts.commands and len(unmatched) < args.unmatched:
-                unmatched.append((facts.session_id, facts.commands))
+        stats = classify_sessions(db, classifier, name, rows, args.batch_size)
 
-    if not total:
-        print("No sessions in the database.")
-        return 0
-
-    print(f"{total} sessions\n")
-
-    print("Intent")
-    for intent, count in intents.most_common():
-        print(f"  {intent.value:<20} {count:>6}  {count / total:>6.1%}")
-
-    majority = intents.most_common(1)[0]
-    print(
-        f"\n  Always answering {majority[0].value!r} would score "
-        f"{majority[1] / total:.1%} accuracy while knowing nothing.\n"
-        "  That is the floor any classifier has to beat, and the reason this\n"
-        "  project reports macro-averaged F1 instead.\n"
-    )
-
-    print("Behaviour")
-    for behaviour, count in behaviours.most_common():
-        print(f"  {behaviour.value:<24} {count:>6}")
-
-    print("\nOperator")
-    for operator, count in operators.most_common():
-        print(f"  {operator.value:<20} {count:>6}")
-
-    print(f"\nMean rule coverage: {coverage_total / total:.1%}")
-
-    if unmatched:
-        print(f"\nSessions no rule recognised (showing {len(unmatched)}):")
-        for session_id, commands in unmatched:
-            print(f"\n  {session_id}")
-            for command in commands[:8]:
-                print(f"    {command[:160]}")
-
+    print(stats)
     return 0
 
 

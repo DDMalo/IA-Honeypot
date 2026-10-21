@@ -584,6 +584,91 @@ Truncation is treated as permanent rather than retried. Generation runs at tempe
 
 Record what you measure, including the models that were too slow to use. The first round is written up in [`docs/model-comparison.md`](../../docs/model-comparison.md): `qwen2.5:1.5b` runs here at about 23 seconds a session, `llama3.2:3b` does not run at all — 2.0 GB of weights on 2.5 GB of free memory is a machine swapping, not a model thinking. "A 7B model took four minutes per session on this laptop" is a finding, and it is the sort of thing nobody publishes and everybody rediscovers.
 
+## Storing the labels
+
+Everything above produces a label and prints it. This is where labels start
+being kept.
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+
+python -m honeypot_ai.classify --dry-run             # rehearse
+python -m honeypot_ai.classify                       # the rule engine
+python -m honeypot_ai.classify --classifier gemini --limit 200
+```
+
+Safe to re-run. A session already labelled by that classifier under the
+current taxonomy is skipped, so the rules can run on a timer while a metered
+model is pointed at a bounded number of sessions by hand.
+
+### Every classifier keeps its own answer
+
+Labels are keyed by `(session_id, classifier)`, so the rule engine, each model
+and — from v0.5.0 — a human analyst all write their own row for the same
+session. Running all three leaves three labels per session.
+
+That is the point. Storing a single "best" label would be smaller and would
+throw away the only part worth having: where two classifiers agree there is
+nothing to learn, and where they disagree is what the evaluation is made of.
+The disagreement has already earned its keep once, when a model spotted a
+complete dropper chain the rules had missed entirely.
+
+The classifier's name carries its model — `gemini:gemini-3.5-flash-lite`,
+`ollama:qwen2.5:1.5b` — so upgrading a model starts a new series rather than
+silently rewriting what the old one concluded. Comparing two versions of a
+model later is then a query.
+
+```sql
+-- Where do the rules and the model disagree?
+SELECT r.session_id, r.intent AS rules, g.intent AS model
+FROM session_labels r
+JOIN session_labels g USING (session_id)
+WHERE r.classifier = 'rules'
+  AND g.classifier LIKE 'gemini:%'
+  AND r.intent <> g.intent;
+```
+
+### Labels know which taxonomy they were written under
+
+Each row stores `taxonomy_version`. When the taxonomy changes — it has already
+changed twice while being derived — every stored label was produced against a
+vocabulary that no longer exists, and the worker treats those rows as pending
+and relabels them.
+
+Without that, nothing looks wrong. Every row is still well-formed, every label
+is still in the enum, every constraint still passes, and the counts are a
+mixture of two schemes. It is the same silent-staleness failure as a
+geolocation database that quietly stopped updating, and a column is a cheap
+way to avoid it.
+
+If the *rules* change but the vocabulary does not, there is no version to bump,
+so relabelling is explicit:
+
+```bash
+python -m honeypot_ai.classify --reclassify
+```
+
+### On a timer
+
+Only the rule engine is scheduled. It is deterministic, costs nothing and
+takes milliseconds per session, so labelling everything as it arrives is free:
+
+```bash
+sudo install -m 0644 cowrie-classify.service /etc/systemd/system/
+sudo install -m 0644 cowrie-classify.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowrie-classify.timer
+systemctl list-timers 'cowrie-*'
+```
+
+The language-model classifiers are deliberately left off the timer. Gemini is
+metered and Ollama takes twenty seconds a session on this hardware, so both are
+run deliberately over a bounded number of sessions. A timer that quietly spends
+a quota is a worse failure than a timer that does not exist — and this
+deployment has already paid to learn that, two sections up.
+
 ## Retention
 
 Captured sessions contain IP addresses, which are personal data. Keeping them indefinitely needs a justification, so retention is enforced rather than intended. The reasoning, and what is kept where, is in [`docs/privacy.md`](../../docs/privacy.md).

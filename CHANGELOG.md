@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Labels are stored.** `session_labels` keeps one row per session *per classifier*, so the rule engine and each language model record their own conclusion and a human analyst joins them as another classifier rather than needing a table of their own. Storing a single "best" label would discard the only part worth keeping: agreement between classifiers carries no information, and the disagreement is what the evaluation in 0.5.0 is made of.
+- **Labels carry the taxonomy version they were written under**, so a change to the vocabulary marks the affected rows for relabelling. Without it nothing looks wrong — every row stays well-formed, every constraint still passes, and the counts quietly become a mixture of two schemes.
+- `python -m honeypot_ai.classify`, with `--dry-run`, `--limit` and `--reclassify`. The rule engine runs on a timer; the metered and the slow classifiers are run deliberately over a bounded number of sessions, because a timer that quietly spends a quota is a worse failure than a timer that does not exist.
+
 ## [0.3.0] - 2026-10-05
 
 Third milestone: the captured sessions stop being a pile of addresses and start saying something. Where the traffic comes from, whose network it rents, what others have reported about it, what files it drops — and a dashboard that answers those without opening `psql`.
