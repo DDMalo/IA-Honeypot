@@ -35,7 +35,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
-from sqlalchemy.dialects.postgresql import INET
+from sqlalchemy.dialects.postgresql import ARRAY, INET
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -82,6 +82,9 @@ class SessionRow(Base):
         back_populates="session", cascade="all, delete-orphan", passive_deletes=True
     )
     file_transfers: Mapped[list[FileTransferRow]] = relationship(
+        back_populates="session", cascade="all, delete-orphan", passive_deletes=True
+    )
+    labels: Mapped[list[SessionLabelRow]] = relationship(
         back_populates="session", cascade="all, delete-orphan", passive_deletes=True
     )
 
@@ -303,4 +306,78 @@ class FileIntelRow(Base):
         # retry; both are answered from this pair.
         Index("ix_file_intel_vt_checked_at", "vt_checked_at"),
         Index("ix_file_intel_known", "known"),
+    )
+
+
+class SessionLabelRow(Base):
+    """What one classifier concluded about one session.
+
+    **Several labels per session, on purpose.** The primary key is
+    `(session_id, classifier)`, so the rule engine, each language model and —
+    from v0.5.0 — a human all write their own row for the same session rather
+    than overwriting one another.
+
+    Storing only "the best label" would be smaller and would throw away the
+    one thing worth keeping. Where two classifiers agree there is nothing to
+    learn; where they disagree is where the evaluation lives, and the
+    disagreement has already earned its place once, when a model spotted a
+    complete dropper chain the rules had missed. A schema that keeps a single
+    answer cannot represent that, and by the time anyone wants it the data is
+    gone.
+
+    **The classifier name includes the model.** `ollama:qwen2.5:1.5b` and
+    `gemini:gemini-3.5-flash-lite` are different classifiers, so upgrading a
+    model starts a new series instead of silently rewriting what the old one
+    said. Comparing versions of a model later is then a query rather than an
+    archaeology project.
+
+    **Labels carry the taxonomy version they were written under.** The
+    taxonomy has already changed twice during this project, and when it does,
+    every stored label was produced against a vocabulary that no longer
+    exists. Recording the version lets the worker treat those rows as pending
+    and relabel them, instead of leaving a table that is quietly a mixture of
+    two schemes — the same silent-staleness failure as a geolocation database
+    nobody noticed had stopped updating.
+    """
+
+    __tablename__ = "session_labels"
+
+    session_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey("sessions.session_id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    classifier: Mapped[str] = mapped_column(String(64), primary_key=True)
+
+    intent: Mapped[str] = mapped_column(String(32), nullable=False)
+    #: Multi-valued, and a real array rather than a comma-joined string, so
+    #: "which sessions wrote an SSH key" stays a query the database can index.
+    behaviours: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False, server_default="{}")
+    operator: Mapped[str] = mapped_column(String(16), nullable=False)
+    #: Nullable because a human labeller does not produce one. A CHECK over a
+    #: NULL passes, so the range constraint still holds for every value there
+    #: actually is.
+    confidence: Mapped[float | None] = mapped_column(Float)
+
+    #: Free text written by a model that has just read attacker-controlled
+    #: input. Already stripped of control characters and capped upstream; it
+    #: is stored to be read by a person, never parsed.
+    rationale: Mapped[str | None] = mapped_column(Text)
+
+    taxonomy_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    labelled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    session: Mapped[SessionRow] = relationship(back_populates="labels")
+
+    __table_args__ = (
+        CheckConstraint("confidence >= 0 AND confidence <= 1", name="ck_session_labels_confidence"),
+        # "What did this classifier see most of" and "show me everything it
+        # called staging" are the two questions the dashboard asks.
+        Index("ix_session_labels_classifier_intent", "classifier", "intent"),
+        Index("ix_session_labels_intent", "intent"),
+        # The worker's own query: rows written under an old taxonomy are due
+        # for relabelling, and it should not scan the table to find them.
+        Index("ix_session_labels_taxonomy_version", "taxonomy_version"),
     )

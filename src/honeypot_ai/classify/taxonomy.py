@@ -120,6 +120,18 @@ class Intent(StrEnum):
     """
 
 
+#: Bump whenever a stored label's meaning changes: a category added, removed
+#: or redefined, or the precedence order altered. Stored labels carry the
+#: version they were written under, so the classification worker can find the
+#: ones produced against a vocabulary that no longer exists and relabel them.
+#:
+#: This exists because the taxonomy already moved twice while being derived —
+#: `other` crossed its own threshold and the categories changed both times —
+#: and a labelled set that is quietly a mixture of two schemes is worse than
+#: one that is wrong, because nothing about it looks wrong.
+TAXONOMY_VERSION = 1
+
+
 #: Lowest to highest. A session's intent is the furthest category it reached.
 #: `OTHER` is absent on purpose — it is a fallback, never a rank.
 INTENT_PRECEDENCE: tuple[Intent, ...] = (

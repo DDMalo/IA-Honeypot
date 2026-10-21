@@ -8,6 +8,7 @@ from honeypot_ai.db.schema import (
     FileTransferRow,
     IpIntelRow,
     LoginAttemptRow,
+    SessionLabelRow,
     SessionRow,
 )
 
@@ -18,6 +19,7 @@ __all__ = [
     "FileTransferRow",
     "IpIntelRow",
     "LoginAttemptRow",
+    "SessionLabelRow",
     "SessionRow",
     "database_url",
     "session_factory",

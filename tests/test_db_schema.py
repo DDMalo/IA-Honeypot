@@ -25,7 +25,24 @@ def test_every_expected_table_is_defined() -> None:
         "file_transfers",
         "ip_intel",
         "file_intel",
+        "session_labels",
     }
+
+
+def test_a_session_can_hold_a_label_from_every_classifier() -> None:
+    """Keyed by classifier as well as session, so the rule engine, each model
+    and later a human analyst all record an answer without overwriting one
+    another. Where they agree there is nothing to learn; the disagreement is
+    what the evaluation is made of."""
+    primary_key = Base.metadata.tables["session_labels"].primary_key
+    assert [column.name for column in primary_key.columns] == ["session_id", "classifier"]
+
+
+def test_labels_record_the_taxonomy_they_were_written_under() -> None:
+    """A taxonomy change leaves every stored row well-formed and quietly
+    meaning something else. The version is how the worker finds them."""
+    columns = Base.metadata.tables["session_labels"].columns
+    assert not columns["taxonomy_version"].nullable
 
 
 def test_session_id_is_the_primary_key() -> None:
