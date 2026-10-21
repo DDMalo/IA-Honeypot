@@ -19,6 +19,7 @@ import argparse
 import logging
 import os
 import sys
+from collections.abc import Sequence
 
 from honeypot_ai.classify import rules
 from honeypot_ai.classify.facts import facts_from_row
@@ -32,7 +33,7 @@ from honeypot_ai.classify.worker import (
     classify_sessions,
     pending_sessions,
 )
-from honeypot_ai.db import session_factory
+from honeypot_ai.db import SessionRow, session_factory
 
 #: The name the rule engine's labels are stored under. A plain word rather
 #: than a version string: the rules live in this repository, so `git log` is
@@ -52,6 +53,38 @@ def build_classifier(kind: str, model: str | None) -> tuple[Classifier, str]:
 
     provider = OllamaProvider(model=model) if kind == "ollama" else GeminiProvider(model=model)
     return LlmClassifier(provider).classify, provider.name
+
+
+def _rehearse(classifier: Classifier, rows: Sequence[SessionRow]) -> int:
+    """Print a label per session and write nothing.
+
+    The pipe handling is not incidental. This prints one line per session and
+    there are tens of thousands of them, so the obvious way to read it is
+    `| head`, and `head` closes the pipe as soon as it has enough. Python then
+    raises `BrokenPipeError` on the next write and prints a traceback over the
+    output — which looks exactly like the classifier crashing on session 20.
+
+    Tools that produce unbounded output have to expect to be piped into
+    something that stops listening. That is a normal end to a command, not an
+    error, so it exits quietly.
+    """
+    try:
+        for row in rows:
+            label = classifier(facts_from_row(row))
+            behaviours = ", ".join(sorted(str(b) for b in label.behaviours)) or "—"
+            print(f"  {row.session_id}  {label.intent}  [{behaviours}]")
+        print(f"\nDry run: {len(rows)} session(s) classified, nothing written.")
+    except BrokenPipeError:
+        # Whatever was reading has gone. Point stdout at /dev/null so the
+        # interpreter's own flush at exit does not raise this again, and say
+        # nothing further.
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, sys.stdout.fileno())
+        finally:
+            os.close(devnull)
+
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -107,12 +140,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{name}, taxonomy v{TAXONOMY_VERSION}: {len(rows)} session(s) to label")
 
         if args.dry_run:
-            for row in rows:
-                label = classifier(facts_from_row(row))
-                behaviours = ", ".join(sorted(str(b) for b in label.behaviours)) or "—"
-                print(f"  {row.session_id}  {label.intent}  [{behaviours}]")
-            print(f"\nDry run: {len(rows)} session(s) classified, nothing written.")
-            return 0
+            return _rehearse(classifier, rows)
 
         stats = classify_sessions(db, classifier, name, rows, args.batch_size)
 
