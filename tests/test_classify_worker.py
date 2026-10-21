@@ -256,3 +256,41 @@ def db():  # type: ignore[no-untyped-def]
         for table in reversed(Base.metadata.sorted_tables):
             session.execute(table.delete())
         session.commit()
+
+
+# --- The rehearsal prints tens of thousands of lines ------------------------
+
+
+class _ClosedPipe:
+    """A stdout whose reader has gone away, which is what `| head` leaves."""
+
+    def __init__(self, fd: int) -> None:
+        self._fd = fd
+        self.writes = 0
+
+    def write(self, text: str) -> int:
+        self.writes += 1
+        raise BrokenPipeError(32, "Broken pipe")
+
+    def flush(self) -> None:
+        return None
+
+    def fileno(self) -> int:
+        return self._fd
+
+
+def test_piping_the_rehearsal_into_head_is_not_an_error(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """`head` closes the pipe once it has its twenty lines, and the next write
+    raises. Printing a traceback over the output makes a normal end to a
+    command look exactly like the classifier crashing on session 20."""
+    from honeypot_ai.classify.__main__ import _rehearse
+
+    fd = os.open(os.devnull, os.O_WRONLY)
+    try:
+        pipe = _ClosedPipe(fd)
+        monkeypatch.setattr("sys.stdout", pipe)
+
+        assert _rehearse(label_for, [a_session("s1"), a_session("s2")]) == 0
+        assert pipe.writes == 1  # stopped at the first refused write
+    finally:
+        os.close(fd)
