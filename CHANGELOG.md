@@ -7,10 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`marker_echo` required three or more hex escapes and missed `echo -e "\x6F\x6B"`**, which spells `ok` in two. The threshold had been written around the markers then in the corpus — `GAYFGT` is six bytes, `auth_ok` eight — and 2,555 sessions in a single day walked through a gap one character of regex wide. Widening it surfaced the whole shell-liveness family: hex escapes, arithmetic expansion, plain markers and family handshakes. Written up in `docs/taxonomy.md`.
+- **`process_enumeration` carried no intent**, so a session whose only command was `ps aux` had nothing to resolve and fell to `other`. Intent is the furthest point reached, so a low rank can never lower a session that went further — carrying none was the bug.
+- Arithmetic expansion (`$(( ))`) and `docker ps` now count as `sandbox_check`. This sensor fails the arithmetic probe, answering `-bash: 41+1: command not found` where a real shell prints `READY_42`; that is an emulator issue, recorded in `docs/taxonomy.md`.
+
 ### Added
 
 - **Labels are stored.** `session_labels` keeps one row per session *per classifier*, so the rule engine and each language model record their own conclusion and a human analyst joins them as another classifier rather than needing a table of their own. Storing a single "best" label would discard the only part worth keeping: agreement between classifiers carries no information, and the disagreement is what the evaluation in 0.5.0 is made of.
 - **Labels carry the taxonomy version they were written under**, so a change to the vocabulary marks the affected rows for relabelling. Without it nothing looks wrong — every row stays well-formed, every constraint still passes, and the counts quietly become a mixture of two schemes.
+- `python -m honeypot_ai.classify --audit`, which reports the share of sessions the rules could not label **per day** and flags the days over threshold. Measured over the corpus instead, a single campaign of 2,555 sessions on one day read as 8% of three weeks — a taxonomy apparently broken for a fortnight — while a year later the same campaign would be 0.2% and invisible. A campaign is a thing that happens on a date.
 - `python -m honeypot_ai.classify`, with `--dry-run`, `--limit` and `--reclassify`. The rule engine runs on a timer; the metered and the slow classifiers are run deliberately over a bounded number of sessions, because a timer that quietly spends a quota is a worse failure than a timer that does not exist.
 
 ## [0.3.0] - 2026-10-05

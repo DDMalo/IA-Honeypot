@@ -115,13 +115,18 @@ RULES: tuple[Rule, ...] = (
     _rule(
         Behaviour.PROCESS_ENUMERATION,
         r"\bps\s+-|\bps\s+aux|/proc/\*|proc_dir|\btop\b",
-        None,
+        Intent.FINGERPRINTING,
         "looks at what is running; happens at every stage",
     ),
     _rule(
         Behaviour.SANDBOX_CHECK,
         r"\bmount\b|^\s*env\b|/proc/self\b|^\s*history\s*(\||$)|/proc/1/cgroup"
-        r"|\.dockerenv|\bsystemd-detect-virt\b|\bvirt-what\b|\bdmidecode\b",
+        r"|\.dockerenv|\bsystemd-detect-virt\b|\bvirt-what\b|\bdmidecode\b"
+        # Arithmetic expansion. A real shell prints the sum; an emulator that
+        # does not implement `$(( ))` prints the expression, or an error. This
+        # sensor fails it, which is recorded in docs/taxonomy.md.
+        r"|\$\(\(.+?\)\)"
+        r"|\bdocker\s+(ps|info|images)\b",
         Intent.SHELL_PROBING,
         "asks whether the shell is real; the same question shell_probing asks",
     ),
@@ -154,7 +159,14 @@ RULES: tuple[Rule, ...] = (
     ),
     _rule(
         Behaviour.MARKER_ECHO,
-        r"echo\s+(-e\s+)?[\"']?(\\x[0-9a-f]{2}){3,}|echo\s+xsec\b",
+        # Two hex bytes, not three. The original threshold was written around
+        # the markers then in the corpus — `GAYFGT` is six bytes, `auth_ok` is
+        # eight — and a campaign of 2,555 sessions on 20 October 2026 used
+        # `echo -e "\x6F\x6B"`, which spells `ok` in two. Every one of them
+        # missed the rule by a single character of regex.
+        r"echo\s+(-e\s+)?[\"']?(\\x[0-9a-f]{2}){2,}"
+        # Plain-text markers: the same probe without the obfuscation.
+        r"|echo\s+[\"']?(xsec|[A-Z][A-Z0-9]*(_[A-Z0-9]+)+)\b",
         Intent.SHELL_PROBING,
         "confirms the shell runs, and announces the family to its operator",
     ),

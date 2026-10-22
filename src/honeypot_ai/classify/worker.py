@@ -24,8 +24,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import date
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session as DbSession
 from sqlalchemy.orm import selectinload
@@ -207,3 +208,63 @@ def classify_pending(
     rows = pending_sessions(db, name, limit, reclassify=reclassify)
     logger.info("%d sessions to classify with %s", len(rows), name)
     return classify_sessions(db, classifier, name, rows, batch_size)
+
+
+#: Above this share of `other` the rules or the taxonomy have a gap, and
+#: `docs/taxonomy.md` says which to suspect. Three percent is the figure that
+#: document already works to.
+OTHER_SHARE_THRESHOLD = 0.03
+
+
+@dataclass(frozen=True)
+class DailyShare:
+    """How much of one day a classifier could not label."""
+
+    day: date
+    unmatched: int
+    total: int
+
+    @property
+    def share(self) -> float:
+        return self.unmatched / self.total if self.total else 0.0
+
+    @property
+    def over_threshold(self) -> bool:
+        return self.share > OTHER_SHARE_THRESHOLD
+
+    def __str__(self) -> str:
+        flag = "  <-- over threshold" if self.over_threshold else ""
+        return f"{self.day}  {self.unmatched:>6} / {self.total:<6} {self.share:6.1%}{flag}"
+
+
+def daily_unmatched(db: DbSession, classifier: str) -> tuple[DailyShare, ...]:
+    """The `other` share per day, oldest first.
+
+    Per day, deliberately. Measured over the whole corpus this number hides
+    both failures it exists to catch. A single day of 2,555 unrecognised
+    sessions showed up as 8% of three weeks and read like a taxonomy that had
+    been broken for weeks; a year later the same campaign would be 0.2% and
+    read like nothing at all. Neither is what happened: one day was 39.5% and
+    every other day was under 0.3%.
+
+    A campaign is a thing that happens on a date. Averaging over the corpus
+    is averaging over the axis the signal lives on.
+    """
+    day = func.date_trunc("day", SessionRow.started_at)
+    unmatched = func.count(SessionLabelRow.session_id).filter(
+        SessionLabelRow.intent == str(Intent.OTHER)
+    )
+
+    statement = (
+        select(day.label("day"), unmatched.label("unmatched"), func.count().label("total"))
+        .select_from(SessionRow)
+        .join(SessionLabelRow, SessionLabelRow.session_id == SessionRow.session_id)
+        .where(SessionLabelRow.classifier == classifier)
+        .group_by(day)
+        .order_by(day)
+    )
+
+    return tuple(
+        DailyShare(day=row.day.date(), unmatched=row.unmatched, total=row.total)
+        for row in db.execute(statement)
+    )

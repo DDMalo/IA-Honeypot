@@ -10,7 +10,7 @@ still owes an answer for.
 from __future__ import annotations
 
 import os
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 
 import pytest
 
@@ -18,7 +18,9 @@ from honeypot_ai.classify.facts import SessionFacts
 from honeypot_ai.classify.taxonomy import TAXONOMY_VERSION, Behaviour, Intent, Label, Operator
 from honeypot_ai.classify.worker import (
     ClassifyStats,
+    DailyShare,
     classify_sessions,
+    daily_unmatched,
     pending_sessions,
 )
 from honeypot_ai.db import SessionLabelRow, SessionRow
@@ -294,3 +296,66 @@ def test_piping_the_rehearsal_into_head_is_not_an_error(monkeypatch) -> None:  #
         assert pipe.writes == 1  # stopped at the first refused write
     finally:
         os.close(fd)
+
+
+# --- Measuring the gap per day ---------------------------------------------
+
+
+def test_a_quiet_day_is_under_threshold() -> None:
+    assert not DailyShare(day=date(2026, 10, 21), unmatched=5, total=8897).over_threshold
+
+
+def test_the_campaign_day_is_over_threshold() -> None:
+    day = DailyShare(day=date(2026, 10, 20), unmatched=2558, total=6484)
+    assert day.over_threshold
+    assert 0.39 < day.share < 0.40
+
+
+def test_a_day_with_no_sessions_is_not_a_division_by_zero() -> None:
+    assert DailyShare(day=date(2026, 10, 2), unmatched=0, total=0).share == 0.0
+
+
+def test_averaging_over_the_corpus_would_hide_both_failures() -> None:
+    """The reason this is measured per day.
+
+    These are the real figures. Over the corpus they come to 8%, which reads
+    as a taxonomy broken for weeks; a year later the same campaign is a
+    rounding error and reads as nothing. Per day, one day is 39.5% and the
+    rest are under 0.3%, which is what actually happened.
+    """
+    days = [
+        DailyShare(day=date(2026, 10, 19), unmatched=7, total=2584),
+        DailyShare(day=date(2026, 10, 20), unmatched=2558, total=6484),
+        DailyShare(day=date(2026, 10, 21), unmatched=5, total=8897),
+    ]
+    pooled = sum(d.unmatched for d in days) / sum(d.total for d in days)
+
+    assert 0.14 < pooled < 0.15  # the pooled figure describes no day at all
+    assert [d.over_threshold for d in days] == [False, True, False]
+
+
+def test_the_line_flags_the_day_it_prints() -> None:
+    """Printed into a terminal somebody is skimming."""
+    assert "over threshold" in str(DailyShare(date(2026, 10, 20), 2558, 6484))
+    assert "over threshold" not in str(DailyShare(date(2026, 10, 21), 5, 8897))
+
+
+@needs_db
+def test_the_audit_counts_unlabelled_sessions_by_day(db) -> None:  # type: ignore[no-untyped-def]
+    old = a_session("old", minutes_ago=60 * 26)  # the day before
+    today = a_session("today")
+    db.add_all([old, today])
+    db.commit()
+
+    classify_sessions(
+        db,
+        lambda facts: Label(
+            session_id=facts.session_id,
+            intent=Intent.OTHER if facts.session_id == "old" else Intent.STAGING,
+        ),
+        "rules",
+        [old, today],
+    )
+
+    days = daily_unmatched(db, "rules")
+    assert [(d.unmatched, d.total) for d in days] == [(1, 1), (0, 1)]

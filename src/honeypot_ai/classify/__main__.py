@@ -21,6 +21,8 @@ import os
 import sys
 from collections.abc import Sequence
 
+from sqlalchemy.orm import Session as DbSession
+
 from honeypot_ai.classify import rules
 from honeypot_ai.classify.facts import facts_from_row
 from honeypot_ai.classify.llm.classifier import LlmClassifier
@@ -29,8 +31,10 @@ from honeypot_ai.classify.llm.ollama import OllamaProvider
 from honeypot_ai.classify.taxonomy import TAXONOMY_VERSION
 from honeypot_ai.classify.worker import (
     DEFAULT_BATCH_SIZE,
+    OTHER_SHARE_THRESHOLD,
     Classifier,
     classify_sessions,
+    daily_unmatched,
     pending_sessions,
 )
 from honeypot_ai.db import SessionRow, session_factory
@@ -53,6 +57,34 @@ def build_classifier(kind: str, model: str | None) -> tuple[Classifier, str]:
 
     provider = OllamaProvider(model=model) if kind == "ollama" else GeminiProvider(model=model)
     return LlmClassifier(provider).classify, provider.name
+
+
+def _audit(db: DbSession, name: str) -> int:
+    """Report what this classifier could not label, by day.
+
+    By day because a campaign is a thing that happens on a date: averaged over
+    the corpus, one day at 39.5% and twenty days at 0.1% come out as 8%, which
+    describes neither.
+    """
+    days = daily_unmatched(db, name)
+    if not days:
+        print(f"{name}: nothing labelled yet")
+        return 0
+
+    print(f"{name}, taxonomy v{TAXONOMY_VERSION}")
+    print(f"{'day':<12} {'other':>6} / {'total':<6} {'share':>7}")
+    for day in days:
+        print(day)
+
+    over = [day for day in days if day.over_threshold]
+    if over:
+        print(
+            f"\n{len(over)} day(s) above {OTHER_SHARE_THRESHOLD:.0%}. Read those sessions:\n"
+            "  the commands nobody matched are either rules that under-match or\n"
+            "  a category the taxonomy is missing, and docs/taxonomy.md says how\n"
+            "  to tell which."
+        )
+    return 0
 
 
 def _rehearse(classifier: Classifier, rows: Sequence[SessionRow]) -> int:
@@ -117,6 +149,12 @@ def main(argv: list[str] | None = None) -> int:
         "for when the rules or the prompt changed rather than the taxonomy",
     )
     parser.add_argument(
+        "--audit",
+        action="store_true",
+        help="report the share of sessions this classifier could not label, "
+        "per day, and flag the days over threshold",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="classify and print, write nothing",
@@ -134,6 +172,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     classifier, name = build_classifier(args.classifier, args.model)
+
+    if args.audit:
+        with session_factory()() as db:
+            return _audit(db, name)
 
     with session_factory()() as db:
         rows = pending_sessions(db, name, args.limit, reclassify=args.reclassify)

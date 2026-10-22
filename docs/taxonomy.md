@@ -216,3 +216,74 @@ The first side-by-side run against a language model produced two disagreements o
 That is the precedence rule not being applied, and it is worth recording here rather than only in the comparison, because it says something about the taxonomy and not only about the model: the rule is the single least intuitive thing in this document, and the one most likely to be got wrong by anybody — human or model — labelling quickly.
 
 It was deliberately not fixed by rewriting the prompt until the model agreed. The rule engine is the baseline being compared against, not the answer key, and tuning a classifier until it matches its own baseline measures imitation rather than skill. Which of the two is right on those sessions is a question for the labelled set in v0.5.0.
+
+## Third pass: a campaign, and a rule that missed by one character
+
+Storing labels for the first time put 31,774 sessions through the rules at once, and `other` came back at **8.17%** — far above the threshold. The first reading was that the taxonomy had been wrong for weeks. It had not. Measured by day:
+
+| Day | `other` | Total | Share |
+|---|---:|---:|---:|
+| 2026-10-01 | 2 | 4,285 | 0.0% |
+| 2026-10-05 | 6 | 3,450 | 0.2% |
+| 2026-10-06 | 15 | 4,437 | 0.3% |
+| 2026-10-16 | 2 | 1,637 | 0.1% |
+| 2026-10-19 | 7 | 2,584 | 0.3% |
+| **2026-10-20** | **2,558** | **6,484** | **39.5%** |
+| 2026-10-21 | 5 | 8,897 | 0.1% |
+
+One day. Every other day under 0.3%. The 8.17% was a single campaign averaged across three weeks, and the pooled figure described no day that had actually happened.
+
+That is a measurement bug as much as a classification one, and it goes both ways: a year from now the same 2,555 sessions would be 0.2% of the corpus and nobody would ever look at them. A campaign is a thing that happens on a *date*, so the threshold is now checked per day — `python -m honeypot_ai.classify --audit`.
+
+### What the campaign was
+
+2,594 of the 2,595 unlabelled sessions held exactly one command, and 2,555 of those were the same one:
+
+```
+echo -e "\x6F\x6B"
+```
+
+`\x6F\x6B` is `ok`. The bot asks the shell to print a two-letter string and checks that the reply is exactly that. A real shell obliges. A honeypot that does not implement `-e`, or does not decode hex escapes, prints something else and gives itself away — and the string is written in hex precisely so that a honeypot cannot cheat by recognising `ok`.
+
+The rules already had `marker_echo` for exactly this. It required **three or more** hex escapes, a threshold written around the markers then in the corpus: `GAYFGT` is six bytes, `auth_ok` is eight. `ok` is two. Two thousand five hundred and fifty-five sessions walked through a gap one character of regex wide.
+
+The lesson is not "write looser patterns". It is that a pattern written to fit the examples in front of you encodes an assumption about the examples you have not seen, and the escape valve is the only thing that ever tells you which assumption it was.
+
+### Four ways of asking the same question
+
+Widening the rule surfaced a whole family already in the corpus, all of it checking whether the shell is real:
+
+| Technique | Example | What it tests |
+|---|---|---|
+| Hex escapes | `echo -e "\x6F\x6B"` | that `-e` decodes |
+| Arithmetic expansion | `echo READY_$((41+1))` | that the shell evaluates |
+| Plain marker | `echo S_CHECK`, `echo SHELL_TEST` | that there is an echo at all |
+| Family handshake | `echo -e "\x47\x41\x59\x46\x47\x54"` | `GAYFGT` — Gafgyt/BASHLITE |
+
+The arithmetic one is the cleverest, and the only one this sensor fails. Asked directly:
+
+```
+$ echo -e "\x6F\x6B"            → ok              ✓
+$ echo -e "\x47\x41\x59..."     → GAYFGT          ✓
+$ echo TELNET_TEST_OK           → TELNET_TEST_OK  ✓
+$ echo READY_$((41+1))          → -bash: 41+1: command not found
+                                  READY_          ✗
+```
+
+A real shell prints `READY_42`. This one emits a `bash`-shaped error that no `bash` would ever produce for that input, and then a truncated string. It is a worse tell than silence: the error message is itself a fingerprint, and it reveals that `$(...)` is being parsed as command substitution rather than `$(( ))` as arithmetic.
+
+Seven sessions in the corpus used it. All seven know.
+
+That belongs to the emulator rather than to this taxonomy, so it is recorded here and tracked as a sensor issue. Arithmetic expansion now counts as `sandbox_check` — the behaviour already defined as "testing whether the shell is real" — under `shell_probing`, which already covered it.
+
+### And one genuinely loose wire
+
+`ps aux | head -10` matched `process_enumeration` and came out as `other`, because that behaviour deliberately carried no intent: looking at running processes happens at every stage, so it was thought not to indicate one.
+
+That reasoning confuses *not raising the ceiling* with *contributing nothing*. Intent is the furthest point reached, so a low-ranked intent can never lower a session that went further — a staging session that also runs `ps` is still staging. Carrying no intent at all meant a session whose only command was `ps aux` had nothing to resolve and fell through. It is now `fingerprinting`, which is what looking at processes is when it is all you did.
+
+### What changed, and what did not
+
+**No new categories.** Every one of these sessions fits a label that already existed; what was wrong was the rules, not the vocabulary. So `TAXONOMY_VERSION` does not move and stored labels are not invalidated — the fix is `--reclassify`, which re-runs the rules against the same vocabulary.
+
+Worth separating, because the escape valve fires the same way for both and they need opposite responses. A missing category means the taxonomy cannot describe what it is seeing. An under-matching rule means it can describe it perfectly well and failed to notice. The first is a design problem; the second is a bug. This was the second, twice.
