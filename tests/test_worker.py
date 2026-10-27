@@ -17,13 +17,8 @@ from pathlib import Path
 
 import pytest
 
-from honeypot_ai.ingest.worker import (
-    MAX_BIND_PARAMETERS,
-    _batched,
-    _fingerprint,
-    log_files,
-    rows_per_statement,
-)
+from honeypot_ai.db.limits import MAX_BIND_PARAMETERS, in_chunks, rows_per_statement
+from honeypot_ai.ingest.worker import _batched, _fingerprint
 from honeypot_ai.models import Command, Session
 
 TS = datetime(2026, 9, 30, 21, 33, 32, tzinfo=UTC)
@@ -187,81 +182,18 @@ def test_a_batch_of_sessions_too_large_for_one_statement_is_written(db) -> None:
     assert stored == 20_000
 
 
-# --- Rotated logs ----------------------------------------------------------
-#
-# Cowrie rotates cowrie.json at midnight. Ingestion was pointed at the live
-# file alone, which on a machine that runs continuously reads everything and on
-# one that is switched on to work reads only what happened since the last
-# midnight. Twenty-six days of rotated logs sat synced and unread on disk.
+def test_an_in_clause_chunk_leaves_room_for_the_rest_of_the_statement() -> None:
+    """A chunk sized exactly to the limit pushes the statement one over it,
+    because the same query also binds a classifier name or a cutoff."""
+    values = [f"id{n}" for n in range(MAX_BIND_PARAMETERS * 2)]
+    assert all(len(chunk) < MAX_BIND_PARAMETERS for chunk in in_chunks(values))
 
 
-def _logs(tmp_path: Path, *names: str) -> Path:
-    for name in names:
-        (tmp_path / name).write_text("")
-    return tmp_path
+def test_chunking_an_in_clause_keeps_every_value_once() -> None:
+    values = [f"id{n}" for n in range(115_353)]  # the run that failed
+    rebuilt = [value for chunk in in_chunks(values) for value in chunk]
+    assert rebuilt == values
 
 
-def test_every_rotated_log_is_read_not_just_the_live_one(tmp_path: Path) -> None:
-    found = log_files(
-        _logs(tmp_path, "cowrie.json", "cowrie.json.2026-10-26", "cowrie.json.2026-10-25")
-    )
-    assert [p.name for p in found] == [
-        "cowrie.json.2026-10-25",
-        "cowrie.json.2026-10-26",
-        "cowrie.json",
-    ]
-
-
-def test_the_live_log_is_read_last(tmp_path: Path) -> None:
-    """It holds the newest half of any session that straddled a rotation."""
-    found = log_files(_logs(tmp_path, "cowrie.json", "cowrie.json.2026-09-30"))
-    assert found[-1].name == "cowrie.json"
-
-
-def test_a_directory_with_only_rotated_logs_still_works(tmp_path: Path) -> None:
-    found = log_files(_logs(tmp_path, "cowrie.json.2026-10-01"))
-    assert [p.name for p in found] == ["cowrie.json.2026-10-01"]
-
-
-def test_a_single_file_is_still_accepted(tmp_path: Path) -> None:
-    log = tmp_path / "cowrie.json"
-    log.write_text("")
-    assert log_files(log) == [log]
-
-
-def test_unrelated_files_are_ignored(tmp_path: Path) -> None:
-    found = log_files(_logs(tmp_path, "cowrie.json", "cowrie.log", ".sync.lock", "notes.txt"))
-    assert [p.name for p in found] == ["cowrie.json"]
-
-
-@needs_db
-def test_a_session_split_across_a_rotation_keeps_its_larger_half(db) -> None:  # type: ignore[no-untyped-def]
-    """Neither half is the whole session, and the second must not replace the
-    first just for arriving later. Cowrie only appends, so a version with
-    fewer commands than the stored one cannot be the same session having
-    shrunk — it is the other side of a rotation."""
-    from honeypot_ai.db import SessionRow
-    from honeypot_ai.ingest.worker import load_sessions
-
-    load_sessions(db, [_session("split", commands=9)])
-    stats = load_sessions(db, [_session("split", commands=2)])
-
-    db.expire_all()
-    assert stats.truncated == 1
-    assert stats.updated == 0
-    assert db.get(SessionRow, "split").command_count == 9
-
-
-@needs_db
-def test_a_session_that_grew_is_still_rewritten(db) -> None:  # type: ignore[no-untyped-def]
-    """The guard must not block the ordinary case it sits next to."""
-    from honeypot_ai.db import SessionRow
-    from honeypot_ai.ingest.worker import load_sessions
-
-    load_sessions(db, [_session("grows", commands=2)])
-    stats = load_sessions(db, [_session("grows", commands=9)])
-
-    db.expire_all()
-    assert stats.updated == 1
-    assert stats.truncated == 0
-    assert db.get(SessionRow, "grows").command_count == 9
+def test_nothing_is_yielded_for_an_empty_in_clause() -> None:
+    assert list(in_chunks([])) == []

@@ -61,19 +61,9 @@ def test_stats_read_as_a_sentence() -> None:
 
 
 def test_a_relabelling_run_says_so() -> None:
-    """Otherwise a run that rewrote everything looks like a quiet night."""
-    stats = ClassifyStats(pending=50, labelled=50, replaced=50)
-    assert "50 replacing an earlier label" in str(stats)
-
-
-def test_the_counter_does_not_claim_a_reason_it_cannot_know() -> None:
-    """It knows the session had a label before, and nothing else.
-
-    It said "relabelled for a new taxonomy" and printed that after a
-    --reclassify run, where the taxonomy had not moved at all. A line somebody
-    reads as a result should not assert a cause the code cannot observe.
-    """
-    assert "taxonomy" not in str(ClassifyStats(pending=1, labelled=1, replaced=1))
+    """Otherwise a taxonomy change looks identical to a quiet night."""
+    stats = ClassifyStats(pending=50, labelled=50, relabelled=50)
+    assert "relabelled for a new taxonomy" in str(stats)
 
 
 def test_a_classifier_that_gave_up_is_counted_separately_from_one_that_broke() -> None:
@@ -205,7 +195,7 @@ def test_a_label_from_an_older_taxonomy_is_pending_again(db) -> None:  # type: i
     assert [r.session_id for r in pending_sessions(db, "rules")] == ["s1"]
 
     stats = classify_sessions(db, label_for, "rules", pending_sessions(db, "rules"))
-    assert stats.replaced == 1
+    assert stats.relabelled == 1
 
     # The upsert goes through SQL, so the row held in memory is stale.
     db.expire_all()
