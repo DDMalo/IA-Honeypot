@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 from honeypot_ai.db import session_factory
-from honeypot_ai.ingest.worker import DEFAULT_BATCH_SIZE, ingest_file
+from honeypot_ai.ingest.worker import DEFAULT_BATCH_SIZE, ingest_path, log_files
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -22,7 +22,11 @@ def main(argv: list[str] | None = None) -> int:
         prog="python -m honeypot_ai.ingest",
         description="Load a Cowrie log into the database. Safe to re-run.",
     )
-    parser.add_argument("log", type=Path, help="path to cowrie.json")
+    parser.add_argument(
+        "log",
+        type=Path,
+        help="cowrie.json, or the directory holding it and its rotated copies",
+    )
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -37,12 +41,16 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(message)s",
     )
 
-    if not args.log.is_file():
-        print(f"No such file: {args.log}", file=sys.stderr)
+    if not args.log.exists():
+        print(f"No such file or directory: {args.log}", file=sys.stderr)
+        return 2
+
+    if not log_files(args.log):
+        print(f"No Cowrie logs in {args.log}", file=sys.stderr)
         return 2
 
     with session_factory()() as db:
-        stats = ingest_file(db, args.log, args.batch_size)
+        stats = ingest_path(db, args.log, args.batch_size)
 
     if stats.parse is not None and stats.parse.skipped:
         print(

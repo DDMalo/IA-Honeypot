@@ -34,6 +34,7 @@ from sqlalchemy.orm import selectinload
 from honeypot_ai.classify.facts import SessionFacts, facts_from_row
 from honeypot_ai.classify.taxonomy import TAXONOMY_VERSION, Intent, Label
 from honeypot_ai.db import SessionLabelRow, SessionRow
+from honeypot_ai.db.limits import in_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -52,14 +53,19 @@ class ClassifyStats:
 
     pending: int = 0
     labelled: int = 0
-    relabelled: int = 0
+    replaced: int = 0
     unclassified: int = 0
     failed: int = 0
 
     def __str__(self) -> str:
         parts = [f"{self.pending} sessions pending", f"{self.labelled} labelled"]
-        if self.relabelled:
-            parts.append(f"{self.relabelled} relabelled for a new taxonomy")
+        if self.replaced:
+            # Deliberately says what happened, not why. This counter knows the
+            # session had a label before and nothing else: the cause may be a
+            # taxonomy change or an explicit --reclassify, and asserting the
+            # wrong one in a line somebody reads as a result is how a figure
+            # starts being quoted as something it is not.
+            parts.append(f"{self.replaced} replacing an earlier label")
         if self.unclassified:
             parts.append(f"{self.unclassified} unclassified")
         if self.failed:
@@ -132,7 +138,7 @@ def classify_sessions(
             stats.unclassified += 1
 
         if row.session_id in already:
-            stats.relabelled += 1
+            stats.replaced += 1
         stats.labelled += 1
 
         pending_writes.append(
@@ -164,14 +170,20 @@ def _labelled_under_older_taxonomy(
     db: DbSession, classifier: str, session_ids: Sequence[str]
 ) -> set[str]:
     """Which of these already have a label, so a rewrite can be counted as one."""
-    if not session_ids:
-        return set()
+    found: set[str] = set()
 
-    statement = select(SessionLabelRow.session_id).where(
-        SessionLabelRow.classifier == classifier,
-        SessionLabelRow.session_id.in_(session_ids),
-    )
-    return set(db.execute(statement).scalars().all())
+    # Split, because the list is as long as the run: 115,353 sessions put
+    # 115,354 bind parameters into one `IN (...)` and the statement was
+    # refused outright. The same limit had just been fixed in ingestion, in
+    # a different shape, which is why it now lives in one place.
+    for chunk in in_chunks(session_ids):
+        statement = select(SessionLabelRow.session_id).where(
+            SessionLabelRow.classifier == classifier,
+            SessionLabelRow.session_id.in_(chunk),
+        )
+        found.update(db.execute(statement).scalars().all())
+
+    return found
 
 
 def _write(db: DbSession, rows: list[dict[str, object]]) -> None:

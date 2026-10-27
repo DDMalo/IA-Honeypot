@@ -1,5 +1,13 @@
 # Loads the synced Cowrie log into PostgreSQL. Triggered by cowrie-ingest.timer.
 
+# The argument is the directory, not cowrie.json. Cowrie rotates its log at
+# midnight, so pointing this at the live file alone reads only what has
+# happened since — correct on a machine that runs continuously, and silently
+# lossy on one that does not. This homelab is switched on to work on the
+# project, and twenty-six days of rotated logs sat synced and unread because
+# of it. Re-reading everything is cheap: ingestion is idempotent and an
+# unchanged session is skipped without a write.
+
 [Unit]
 Description=Ingest Cowrie sessions into PostgreSQL
 Documentation=https://github.com/DDMalo/IA-Honeypot
@@ -11,5 +19,8 @@ Type=oneshot
 User=david
 WorkingDirectory=/home/david/IA-Honeypot
 EnvironmentFile=/home/david/IA-Honeypot/.env
-ExecStart=/home/david/IA-Honeypot/.venv/bin/python -m honeypot_ai.ingest /srv/honeypot/raw/cowrie.json
-TimeoutStartSec=900
+ExecStart=/home/david/IA-Honeypot/.venv/bin/python -m honeypot_ai.ingest /srv/honeypot/raw
+# Generous because the first run after this change reads every rotated log,
+# not just today's. Steady-state runs are seconds: an unchanged session is
+# skipped on a fingerprint comparison, without a write.
+TimeoutStartSec=3600

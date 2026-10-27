@@ -3,7 +3,7 @@
 [![CI](https://github.com/DDMalo/IA-Honeypot/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/DDMalo/IA-Honeypot/actions/workflows/ci.yml)
 > SSH/Telnet honeypot with AI-powered attack classification.
 
-**Status:** v0.4.0 — running against live traffic since 1 October 2026. Over 31,000 real sessions captured, enriched and classified. See the [milestones](../../milestones) for what is next.
+**Status:** v0.4.0 — running against live traffic since 30 September 2026. **115,393 real sessions** from 5,845 distinct addresses, captured, enriched and classified. See the [milestones](../../milestones) for what is next.
 
 ## What is this?
 
@@ -17,10 +17,11 @@ The point of the project is to **measure** which approach works, rather than to 
 
 The honeypot is not a demo; it is pointed at the internet and the traffic is real. A few things that came out of it:
 
-- **A taxonomy derived from 7,735 real sessions** rather than from a list of plausible categories, with an `other` class that is measured rather than decorative. When it crosses its threshold, the taxonomy is declared wrong, not the session. That has happened three times.
+- **A taxonomy derived from 7,735 real sessions** rather than from a list of plausible categories, with an `other` class that is measured rather than decorative. When it crosses its threshold, the taxonomy is declared wrong, not the session. That has happened three times, and the rules now leave 38 of 115,393 sessions unlabelled — but the number that matters is measured per day, because a campaign is a thing that happens on a date and an average over the corpus hides one.
 - **Attackers check whether they are in a honeypot.** `mount`, `env`, `ls /proc/self`, `history` — reconnaissance of the shell rather than of the host. Somebody built the expectation of honeypots into their tooling.
 - **A campaign of 2,555 sessions in a single day**, each one command: `echo -e "\x6F\x6B"`, a shell-liveness probe written in hex so a honeypot cannot cheat by recognising `ok`. It exposed both a rule that missed by one character of regex and a way of measuring that hid a one-day spike inside a three-week average.
 - **This sensor fails one of those probes.** `echo READY_$((41+1))` returns a `bash`-shaped error where a real shell prints `READY_42`. Seven sessions in the corpus used it; all seven know.
+- **A Mirai variant uploaded itself through the shell, 32 bytes at a time.** On 13 October, hundreds of near-identical sessions each ran about 575 commands over two and a half minutes, writing an ARM executable with repeated `echo -ne "\x7F\x45\x4C\x46..." >> .d` — the ELF magic number, then its header, then the code — before `chmod +x` and `./dvrHelper selfrep`. It also swept `/proc` killing every process whose executable had been deleted, which is how in-memory implants look: it was clearing out rival malware before installing. The payload never crossed the network, so there is no hash to look up and no download to block; the binary is in the command log.
 
 ## Architecture
 
@@ -49,7 +50,7 @@ The homelab always initiates. The sensor holds no credential that reaches into t
 
 ## Security considerations
 
-Running a honeypot involves real risks, and most of this project's design is about containing them. The sensor is a dedicated VPS, never the home network. Its outbound traffic is blocked, so it cannot be used against anyone else. Malware samples never leave the sensor and never enter this repository — only hashes do. Attacker-authored text is treated as untrusted when it reaches a language model, and what bounds the damage is not the prompt but the architecture: the model can call no tool, run no command, and anything it invents fails schema validation.
+Running a honeypot involves real risks, and most of this project's design is about containing them. The sensor is a dedicated VPS, never the home network. Its outbound traffic is blocked, so it cannot be used against anyone else. Malware samples never leave the sensor and never enter this repository — only hashes do. That rule was written for files an attacker downloads, and one campaign found the gap in it: a payload typed into the shell as hex never becomes a file at all, so it arrives as ordinary session text and is subject to no sample-handling rule by default. Command logs from those sessions are treated as samples, which means they are never published verbatim. Attacker-authored text is treated as untrusted when it reaches a language model, and what bounds the damage is not the prompt but the architecture: the model can call no tool, run no command, and anything it invents fails schema validation.
 
 ## Development setup
 
