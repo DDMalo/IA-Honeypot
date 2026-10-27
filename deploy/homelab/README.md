@@ -47,7 +47,7 @@ journalctl -u cowrie-log-sync.service -n 30 --no-pager
 ```bash
 systemctl list-timers cowrie-log-sync.timer     # when it last ran, when it runs next
 journalctl -u cowrie-log-sync.service -f        # watch a run
-wc -l /srv/honeypot/raw/cowrie.json             # events collected so far
+cat /srv/honeypot/raw/cowrie.json* | wc -l      # events collected so far
 du -sh /srv/honeypot/raw                        # disk usage
 ```
 
@@ -107,6 +107,7 @@ alembic check                    # do the models and the database still agree?
 
 Two properties the ingestion worker depends on:
 
+- **The argument is the directory, not `cowrie.json`.** Cowrie rotates its log at midnight, so the live file holds only what has happened since. Pointing ingestion at it alone is correct on a machine that runs all the time and silently lossy on one that is switched on to work: every day this homelab was off, the day's events were rotated away before anything read them. Reading the directory costs nothing extra, because an unchanged session is skipped without a write.
 - **Re-ingestion is safe.** The session id is the primary key and child rows are unique per `(session_id, seq)`, so reading the same log twice changes nothing. A failed run is fixed by running it again.
 - **Deleting a session deletes its contents.** Foreign keys cascade, which is what makes the retention policy a single `DELETE` rather than a script.
 
@@ -120,7 +121,7 @@ Parsing the synced log and loading it into PostgreSQL.
 cd ~/IA-Honeypot
 source .venv/bin/activate
 set -a && . ./.env && set +a
-python -m honeypot_ai.ingest /srv/honeypot/raw/cowrie.json
+python -m honeypot_ai.ingest /srv/honeypot/raw
 ```
 
 The command prints what it did, for example `412 sessions seen, 7 new, 2 updated, 403 unchanged`.
