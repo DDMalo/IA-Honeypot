@@ -52,14 +52,19 @@ class ClassifyStats:
 
     pending: int = 0
     labelled: int = 0
-    relabelled: int = 0
+    replaced: int = 0
     unclassified: int = 0
     failed: int = 0
 
     def __str__(self) -> str:
         parts = [f"{self.pending} sessions pending", f"{self.labelled} labelled"]
-        if self.relabelled:
-            parts.append(f"{self.relabelled} relabelled for a new taxonomy")
+        if self.replaced:
+            # Deliberately says what happened, not why. This counter knows the
+            # session had a label before and nothing else: the cause may be a
+            # taxonomy change or an explicit --reclassify, and asserting the
+            # wrong one in a line somebody reads as a result is how a figure
+            # starts being quoted as something it is not.
+            parts.append(f"{self.replaced} replacing an earlier label")
         if self.unclassified:
             parts.append(f"{self.unclassified} unclassified")
         if self.failed:
@@ -132,7 +137,7 @@ def classify_sessions(
             stats.unclassified += 1
 
         if row.session_id in already:
-            stats.relabelled += 1
+            stats.replaced += 1
         stats.labelled += 1
 
         pending_writes.append(
