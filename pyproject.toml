@@ -11,8 +11,8 @@ license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "pydantic>=2.14.1",
-    "sqlalchemy>=2.1.5",
-    "alembic>=1.20.0",
+    "sqlalchemy>=2.1.6",
+    "alembic>=1.20.1",
     "psycopg[binary]>=3.3.6",
     "geoip2>=5.3.0",
     "httpx>=0.28.1",
