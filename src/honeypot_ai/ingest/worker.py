@@ -47,13 +47,22 @@ class LoadStats:
     inserted: int = 0
     updated: int = 0
     unchanged: int = 0
+    truncated: int = 0
+    files: int = 0
     parse: ParseStats | None = None
 
     def __str__(self) -> str:
-        return (
-            f"{self.seen} sessions seen, {self.inserted} new, "
-            f"{self.updated} updated, {self.unchanged} unchanged"
-        )
+        parts = [
+            f"{self.seen} sessions seen",
+            f"{self.inserted} new",
+            f"{self.updated} updated",
+            f"{self.unchanged} unchanged",
+        ]
+        if self.truncated:
+            parts.append(f"{self.truncated} split across a rotation")
+        if self.files > 1:
+            parts.append(f"{self.files} files")
+        return ", ".join(parts)
 
 
 def _batched(items: Iterable[Session], size: int) -> Iterator[list[Session]]:
@@ -125,6 +134,12 @@ def load_sessions(
             if previous is None:
                 stats.inserted += 1
                 changed.append(session)
+            elif previous[2] > len(session.commands):
+                # Smaller than what is stored. Cowrie only appends, so this
+                # cannot be the same session having shrunk; it is one half of
+                # a session that straddled a log rotation, and the stored half
+                # is the bigger one. See the note in `log_files`.
+                stats.truncated += 1
             elif previous != _fingerprint(session):
                 stats.updated += 1
                 changed.append(session)
@@ -215,6 +230,62 @@ def _insert_rows(db: DbSession, model: type, rows: Sequence[Mapping[str, Any]]) 
 
     for chunk in chunked(rows, rows_per_statement(len(rows[0]))):
         db.execute(insert(model).values(chunk))
+
+
+#: Cowrie writes to `cowrie.json` and rotates it daily to `cowrie.json.<date>`.
+LIVE_LOG = "cowrie.json"
+
+
+def log_files(path: Path | str) -> list[Path]:
+    """Every Cowrie log under `path`, oldest first, with the live one last.
+
+    A directory is the useful argument. Pointed at the single live file, this
+    worker reads only what has not yet been rotated — which is whatever has
+    happened since midnight. That is correct on a machine that runs all the
+    time and silently lossy on one that does not: every day the homelab was
+    switched off, the day's events were rotated away before anything read
+    them. Twenty-six days of logs sat synced and unread on disk because of it,
+    and the database held 41,346 sessions out of 115,393 captured.
+
+    Order matters. The rotated names sort by date and the live file is newest,
+    so it goes last. A session that straddles a rotation appears as two halves,
+    one in each file, and neither is the whole thing; `load_sessions` keeps the
+    larger half rather than letting the second overwrite the first. That is a
+    deliberate approximation, not a merge: joining the halves would mean
+    holding every open session across the whole set in memory, and the handful
+    of sessions a day that span midnight do not justify it.
+    """
+    path = Path(path)
+    if path.is_file():
+        return [path]
+
+    rotated = sorted(p for p in path.glob(f"{LIVE_LOG}.*") if p.is_file())
+    live = path / LIVE_LOG
+    return [*rotated, *([live] if live.is_file() else [])]
+
+
+def ingest_path(db: DbSession, path: Path | str, batch_size: int = DEFAULT_BATCH_SIZE) -> LoadStats:
+    """Ingest a log file, or every log in a directory, oldest first."""
+    total = LoadStats()
+
+    for log in log_files(path):
+        logger.info("Reading %s", log)
+        stats = ingest_file(db, log, batch_size)
+
+        total.files += 1
+        total.seen += stats.seen
+        total.inserted += stats.inserted
+        total.updated += stats.updated
+        total.unchanged += stats.unchanged
+        total.truncated += stats.truncated
+        if stats.parse is not None:
+            if total.parse is None:
+                total.parse = stats.parse
+            else:
+                total.parse.malformed += stats.parse.malformed
+                total.parse.invalid += stats.parse.invalid
+
+    return total
 
 
 def ingest_file(db: DbSession, path: Path | str, batch_size: int = DEFAULT_BATCH_SIZE) -> LoadStats:
