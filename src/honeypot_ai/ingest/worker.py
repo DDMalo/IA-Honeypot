@@ -18,11 +18,12 @@ skipped, so a run over a file that has barely grown costs almost nothing.
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Iterator
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from itertools import islice
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
@@ -35,6 +36,21 @@ from honeypot_ai.models import Session
 logger = logging.getLogger(__name__)
 
 DEFAULT_BATCH_SIZE = 500
+
+#: PostgreSQL's wire protocol allows at most 65,535 bind parameters in a single
+#: statement, and a multi-row INSERT spends one per column per row.
+#:
+#: `DEFAULT_BATCH_SIZE` bounds sessions, which is the wrong quantity: a session
+#: may carry one command or two hundred, so the number of child rows in a batch
+#: is not bounded by anything. Five hundred ordinary sessions are a few hundred
+#: rows; five hundred sessions from a scripted campaign are fifteen thousand,
+#: and at five columns each that is 75,450 parameters.
+#:
+#: It held for a month and then failed on the first busy backlog — and failed
+#: whole, taking the entire run with it rather than the batch. The session
+#: batch stays the transaction boundary; this only splits the statements
+#: inside it, so atomicity is unchanged.
+MAX_BIND_PARAMETERS = 65_535
 
 
 @dataclass
@@ -196,12 +212,29 @@ def _write(db: DbSession, sessions: list[Session], now: datetime) -> None:
         for index, transfer in enumerate(session.file_transfers)
     ]
 
-    if logins:
-        db.execute(insert(LoginAttemptRow).values(logins))
-    if commands:
-        db.execute(insert(CommandRow).values(commands))
-    if transfers:
-        db.execute(insert(FileTransferRow).values(transfers))
+    _insert_rows(db, LoginAttemptRow, logins)
+    _insert_rows(db, CommandRow, commands)
+    _insert_rows(db, FileTransferRow, transfers)
+
+
+def rows_per_statement(columns: int) -> int:
+    """How many rows of this width fit under the bind-parameter limit."""
+    return max(1, MAX_BIND_PARAMETERS // max(1, columns))
+
+
+def _insert_rows(db: DbSession, model: type, rows: Sequence[Mapping[str, Any]]) -> None:
+    """Insert rows, split into as many statements as the limit requires.
+
+    Splitting on rows rather than on sessions is the point: the limit is a
+    property of the statement, and no amount of bounding the session count
+    bounds the statement.
+    """
+    if not rows:
+        return
+
+    size = rows_per_statement(len(rows[0]))
+    for start in range(0, len(rows), size):
+        db.execute(insert(model).values(rows[start : start + size]))
 
 
 def ingest_file(db: DbSession, path: Path | str, batch_size: int = DEFAULT_BATCH_SIZE) -> LoadStats:

@@ -17,7 +17,12 @@ from pathlib import Path
 
 import pytest
 
-from honeypot_ai.ingest.worker import _batched, _fingerprint
+from honeypot_ai.ingest.worker import (
+    MAX_BIND_PARAMETERS,
+    _batched,
+    _fingerprint,
+    rows_per_statement,
+)
 from honeypot_ai.models import Command, Session
 
 TS = datetime(2026, 9, 30, 21, 33, 32, tzinfo=UTC)
@@ -128,3 +133,54 @@ def test_deleting_a_session_removes_its_children(db) -> None:  # type: ignore[no
     db.commit()
 
     assert db.query(CommandRow).count() == 0
+
+
+# --- The bind-parameter limit ----------------------------------------------
+#
+# Ingestion batched five hundred sessions per transaction and then wrote every
+# child row of those sessions in one INSERT. Sessions bound the transaction;
+# nothing bound the statement. On 27 October a backlog of scripted sessions put
+# 15,090 commands in one batch — 75,450 bind parameters against a protocol
+# limit of 65,535 — and the whole run failed rather than the batch.
+
+
+def test_a_statement_never_exceeds_the_protocol_limit() -> None:
+    for columns in range(1, 40):
+        assert rows_per_statement(columns) * columns <= MAX_BIND_PARAMETERS
+
+
+def test_a_row_wider_than_the_limit_still_yields_one_row() -> None:
+    """Dividing to zero would loop forever rather than fail."""
+    assert rows_per_statement(MAX_BIND_PARAMETERS * 2) == 1
+    assert rows_per_statement(0) >= 1
+
+
+def test_the_batch_that_broke_it_now_splits() -> None:
+    """The real numbers from the failure."""
+    assert 15_090 * 5 > MAX_BIND_PARAMETERS
+    assert rows_per_statement(5) < 15_090
+
+
+@needs_db
+def test_a_batch_of_sessions_too_large_for_one_statement_is_written(db) -> None:  # type: ignore[no-untyped-def]
+    """The regression, end to end.
+
+    Two sessions of 10,000 commands is 100,000 bind parameters in a single
+    INSERT. Before the fix this raised and nothing at all was ingested.
+    """
+    from sqlalchemy import func, select
+
+    from honeypot_ai.db import CommandRow
+    from honeypot_ai.ingest.worker import load_sessions
+
+    sessions = [_session("big1", commands=10_000), _session("big2", commands=10_000)]
+    stats = load_sessions(db, sessions, batch_size=500)
+
+    stored = db.execute(
+        select(func.count())
+        .select_from(CommandRow)
+        .where(CommandRow.session_id.in_(["big1", "big2"]))
+    ).scalar_one()
+
+    assert stats.inserted == 2
+    assert stored == 20_000

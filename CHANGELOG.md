@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Ingestion failed whole on a large backlog.** Sessions were batched five hundred at a time, and every child row of those sessions went into one INSERT. The batch bounded the transaction; nothing bounded the statement. A session may carry one command or two hundred, so after the sensor's outage on 27 October a backlog of scripted sessions put 15,090 commands in a single batch — 75,450 bind parameters against PostgreSQL's protocol limit of 65,535 — and `number of parameters must be between 0 and 65535` took the entire run with it rather than the batch. Child rows are now split into as many statements as the limit requires. The session batch is still the transaction boundary, so atomicity is unchanged.
+
 ## [0.4.0] - 2026-10-27
 
 Fourth milestone: sessions stop being events and become labelled behaviour. A taxonomy derived from the honeypot's own traffic, a deterministic rule engine, three language-model backends behind one interface, an adversarial corpus to measure the prompt against, and labels in the database — one row per session per classifier, so the disagreements survive to be evaluated in 0.5.0.
