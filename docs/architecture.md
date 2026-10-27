@@ -48,6 +48,24 @@ The homelab pulls the log over the tunnel, groups events into sessions, and stor
 
 Direction matters: the homelab always initiates. The sensor holds no credential that reaches into the home network, so a fully compromised sensor gains no foothold at home.
 
+### Classification writes several answers, not one
+
+`session_labels` is keyed by `(session_id, classifier)`, so the rule engine and
+each language model record their own conclusion about the same session, and a
+human analyst joins them as another classifier in v0.5.0 rather than needing a
+table of their own.
+
+Collapsing that to one label per session would be the obvious schema and the
+wrong one. Agreement between classifiers carries no information; the
+disagreement is the entire basis of the evaluation, and it has already been
+worth something once — a model found a complete dropper chain the rules had
+missed. A schema that stores a single answer cannot represent a disagreement,
+and the data is gone by the time anyone wants it.
+
+Each row also carries the `taxonomy_version` it was written under, so a change
+to the vocabulary marks the affected labels for relabelling instead of leaving
+a table that is silently a mixture of two schemes.
+
 ## Trust boundaries
 
 | Boundary | Assumption |
@@ -70,7 +88,7 @@ Direction matters: the homelab always initiates. The sensor holds no credential 
 | 7 | Administrative SSH is brute-forced | Key-only authentication, no root login, non-standard port; port 22 is the honeypot, so every attempt there is unambiguously hostile |
 | 8 | Loss of the sensor (provider suspension, failure) | Everything is reproducible from the repository; captured data already lives on the homelab |
 
-Threat 5 is the one that makes this project unusual. Most LLM pipelines process cooperative input; this one processes text written by people actively trying to subvert a machine, and some of them will write text aimed at whatever reads the logs afterwards. The pipeline is therefore built so that a successful injection changes a classification label and nothing else.
+Threat 5 has its own document, [`prompt-injection.md`](prompt-injection.md), with the defences, an adversarial corpus and a way to score a model against it. It is the one that makes this project unusual. Most LLM pipelines process cooperative input; this one processes text written by people actively trying to subvert a machine, and some of them will write text aimed at whatever reads the logs afterwards. The pipeline is therefore built so that a successful injection changes a classification label and nothing else.
 
 ## Deliberate trade-offs
 

@@ -2,11 +2,26 @@
 #
 # geoipupdate is MaxMind's own client: it verifies checksums and skips the
 # download when nothing changed, which keeps the free tier's 30-downloads-a-day
-# limit comfortably out of reach.
+# limit comfortably out of reach — as long as it can write where it is told.
+#
+# ## The sandbox and the database directory must agree
+#
+# ProtectSystem=strict mounts the entire filesystem read-only for this process
+# and nothing else. ReadWritePaths below is the one hole in that, and it has to
+# name the same directory as `DatabaseDirectory` in /etc/GeoIP.conf. If the two
+# ever disagree, every run downloads the database in full and then fails to
+# write it, which is both silent and expensive — see the note in README.md.
+#
+# This is not hypothetical. The Debian package ships its own unit with the same
+# hardening and `ReadWritePaths=/var/lib/GeoIP/`, the default directory. This
+# deployment keeps its databases elsewhere, so that unit failed on every run for
+# a fortnight, burned the daily download quota retrying a failure that could
+# never succeed, and reported it only in the journal nobody was reading.
 
 [Unit]
 Description=Update the GeoLite2 databases
 Documentation=https://github.com/DDMalo/IA-Honeypot
+ConditionPathExists=/etc/GeoIP.conf
 After=network-online.target
 Wants=network-online.target
 
@@ -14,3 +29,23 @@ Wants=network-online.target
 Type=oneshot
 ExecStart=/usr/bin/geoipupdate
 TimeoutStartSec=300
+
+# The databases live here, so this is the only path the service may write to.
+# Change it together with DatabaseDirectory in /etc/GeoIP.conf, never alone.
+ReadWritePaths=/srv/honeypot/geoip
+
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true

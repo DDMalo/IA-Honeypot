@@ -52,6 +52,20 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
 
+        for age in locator.ages():
+            print(age, file=sys.stderr)
+
+        # Printed before the work and repeated as a warning, because the
+        # failure this guards against is silent: a broken updater leaves
+        # enrichment working perfectly on data that is slowly going wrong.
+        for stale in locator.stale_databases():
+            print(
+                f"WARNING {stale.name} is {stale.age.days} days old; "
+                "the GeoLite2 updater has probably stopped working. "
+                "Check: systemctl status geolite-update.service",
+                file=sys.stderr,
+            )
+
         with session_factory()() as db:
             stats = enrich_pending(db, locator, args.limit, args.batch_size)
 

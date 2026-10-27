@@ -82,8 +82,49 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  # Optional, and off by default: this machine has 3.2 GB of RAM and already
+  # runs PostgreSQL and Grafana, so a model is something you turn on when you
+  # want it rather than something that competes for memory all day.
+  #
+  #   docker compose --profile llm up -d
+  #
+  # Running Ollama natively instead of in a container is also reasonable and a
+  # little faster; the provider only needs OLLAMA_HOST to point at it.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: honeypot-ollama
+    restart: unless-stopped
+    profiles: ["llm"]
+    ports:
+      # Loopback only, like everything else here. A model endpoint with no
+      # authentication is not something to expose to the home network.
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+    environment:
+      # One model in memory at a time, unloaded five minutes after its last
+      # use. The defaults assume a machine with room to spare; this one has
+      # none, and a model that lingers is a model competing with Postgres.
+      OLLAMA_MAX_LOADED_MODELS: "1"
+      OLLAMA_NUM_PARALLEL: "1"
+      OLLAMA_KEEP_ALIVE: "2m"
+    deploy:
+      resources:
+        limits:
+          # Below what the machine has, not above it. A limit larger than
+          # total RAM is not a limit: the kernel runs out first and kills
+          # whatever looks biggest, which on this host is PostgreSQL.
+          memory: 2g
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   postgres-data:
     name: honeypot-postgres-data
   grafana-data:
     name: honeypot-grafana-data
+  ollama-models:
+    name: honeypot-ollama-models

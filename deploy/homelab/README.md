@@ -187,6 +187,11 @@ They are free but require an account, and their licence requires attribution (se
 
 ```bash
 sudo apt install -y geoipupdate
+
+# The package enables a scheduler of its own. Turn it off before going any
+# further — see "Two updaters are worse than one" below for why.
+sudo systemctl disable --now geoipupdate.timer
+
 sudo mkdir -p /srv/honeypot/geoip
 sudo chown david:david /srv/honeypot/geoip
 
@@ -203,6 +208,62 @@ sudo install -m 0644 geolite-update.service /etc/systemd/system/
 sudo install -m 0644 geolite-update.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now geolite-update.timer
+```
+
+Check that exactly one updater is scheduled. The two units are named
+differently, so a search for one will not show the other:
+
+```bash
+systemctl list-timers --all | grep -iE 'geoip|geolite'   # expect geolite-update.timer, alone
+```
+
+#### Two updaters are worse than one
+
+The `geoipupdate` package enables `geoipupdate.timer`, which does the same job
+as the timer above. Running both is not redundancy, it is a bug, and it took a
+fortnight and a warning email from MaxMind to notice here. Three things went
+wrong at once, and all three are worth knowing about:
+
+**They race for a lock.** `geoipupdate` takes a lock file in the database
+directory, and the loser exits immediately without retrying. On a machine that
+is switched off between sessions this happens every time: both timers miss
+their slot while the machine is off, `Persistent=true` fires both at boot, and
+they start within a second of each other. Four consecutive runs of this unit
+died that way with `lock ... already acquired by another process`.
+
+**The package's unit cannot write to a relocated database directory.** It runs
+under `ProtectSystem=strict` with `ReadWritePaths=/var/lib/GeoIP/`, the default
+location. This deployment keeps its databases in `/srv/honeypot/geoip`, so that
+unit downloads each database in full and then fails with `read-only file
+system` — a path that is perfectly writable from a shell and read-only inside
+its sandbox. The hardening is right; the assumption underneath it is what
+breaks, and it breaks in a file nobody edits when they change the directory.
+
+**Retrying made it expensive.** `geoipupdate` treats that write failure as
+transient and retries for five minutes, re-downloading the whole database each
+time. The free tier allows thirty downloads a day. Nine minutes of retrying
+exhausts it, and the rest of the day returns HTTP 429 — including to the unit
+that would have worked. `RetryFor 0s` in `GeoIP.conf.example` stops that.
+
+None of it produced an alert. Enrichment carried on, labelling every session
+with a country and a network from a file that was two weeks stale and getting
+staler. That is what the age check below exists for.
+
+#### Checking the data is fresh
+
+The worker reports the age of each database from the `build_epoch` in its own
+metadata — when MaxMind built it, not when the file landed on disk:
+
+```bash
+python -m honeypot_ai.enrich --limit 0
+```
+
+Over seven days old means at least two published updates were missed, which is
+an updater that has stopped rather than a quiet week:
+
+```bash
+systemctl status geolite-update.service
+journalctl -u geolite-update.service -n 20
 ```
 
 ### Running it
@@ -405,6 +466,208 @@ WHERE t.url IS NOT NULL ORDER BY t.occurred_at DESC LIMIT 20;
 That third query is the one worth looking at. A sample first submitted somewhere else two years ago means this sensor is being swept by an old, wide campaign; a lag of hours means it is close to the source of something new.
 
 Expect modest numbers. The sensor denies outbound traffic, so `wget` and `curl` fail inside the honeypot and most attempted downloads leave a URL but no file. What does get captured arrives by SCP or SFTP, where the attacker pushes the file rather than the sensor fetching it. Losing the fetched samples is the price of not running a machine that downloads malware on an attacker's behalf, and it is worth paying — the URL, which is what the analysis needs, is recorded either way.
+
+## Classification
+
+The rule engine labels sessions from their commands, using the vocabulary in [`docs/taxonomy.md`](../../docs/taxonomy.md). It exists to be beaten: it is the baseline the language model has to improve on, and on data this repetitive it will not be easy.
+
+Nothing is written to the database yet — storing classifications comes with the pipeline integration. This reads:
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+python -m honeypot_ai.classify
+python -m honeypot_ai.classify --unmatched 20
+```
+
+The first prints the distribution across intents and behaviours, the mean rule coverage, and the accuracy a classifier would get by always answering the majority class — the floor any real classifier has to clear.
+
+The second is the one worth reading. It prints sessions where no rule matched anything, which are either a gap in the rules or a gap in the taxonomy. Only reading them tells you which.
+
+### Trying the language model
+
+The rule engine is the baseline; this is the thing that has to beat it. Get a key at [aistudio.google.com](https://aistudio.google.com/apikey) and put it in `.env` as `GEMINI_API_KEY`.
+
+Model names and free-tier limits both change, so start by asking which models the key can actually reach:
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+python -m honeypot_ai.classify.llm --models
+```
+
+**That listing is not a list of models you can use.** It reports what the API knows about, not what your key may call: a recently created key is refused older models with "no longer available to new users", even though they appear in the list. The only reliable test is to try one.
+
+If the default is refused, set `GEMINI_MODEL` in `.env` to another — which will happen eventually, because Google retires model names. It has happened to this project once already: the default was valid when it was written and returned a 404 a few months later. The failure is deliberately loud and says which model to use instead.
+
+The default is a pinned name rather than an alias like `gemini-flash-latest`, because a benchmark whose model changes underneath it is not a benchmark. The trade-off is this maintenance.
+
+It is also deliberately one of the smaller models. The newest flagship was tried first and spent its time returning 503 and 429; a lighter model answered every request on the first attempt. For a task that is "put nine commands into one of seven categories", the largest model in the catalogue is the wrong tool — and if a small model turns out to be enough, that is a result worth reporting rather than a compromise worth hiding.
+
+Then try it on a few real sessions:
+
+```bash
+python -m honeypot_ai.classify.llm --sample 5
+```
+
+Nothing is written. It prints each session's commands, the rule engine's answer and the model's, side by side, marking the ones where they disagree — which are the only interesting rows. Sessions are sampled from the ones that got past a single command, because a random sample would be nine `uname` probes out of ten.
+
+Requests are paced at one every four seconds, which is a conservative floor rather than a claim about the current quota. If the API starts answering 429, check Google's own documentation for the limits that apply to your key.
+
+Expect disagreements, and expect some of them to be the model being right. That is the point of building it. The measured version of this comparison — with a labelled set and real metrics — is v0.5.0.
+
+### Running a model locally
+
+The hosted model answered eight of ten requests in the first real run; the other two were Google saying it was busy. That is the number this is here to be compared against. A model on your own hardware has no quota, no queue and no vendor, it cannot decline to look at malware because a safety filter fired, and it is the only version of this pipeline where attacker data never leaves the homelab.
+
+It will be slower, and probably less accurate. Those are the trade-offs worth measuring rather than assuming.
+
+**The hardware decides the model.** This machine has 3.2 GB of RAM and no GPU, and is already running PostgreSQL and Grafana, which leaves about 2.5 GB free. Check before pulling anything:
+
+```bash
+free -h
+```
+
+The `available` column is the number that matters. Roughly, for four-bit quantised models: 0.5B needs about 0.5 GB, 1.5B about 1.2 GB, 3B about 2.2 GB. On this host that makes 1.5B the sensible starting point and 3B the ceiling — and 3B leaves so little headroom that PostgreSQL becomes the fattest process on the machine, which is exactly what the kernel kills when memory runs out. The container is capped at 2 GB for that reason.
+
+A model that does not fit does not run slowly. It swaps, and effectively stops. Start small and measure.
+
+```bash
+cd ~/IA-Honeypot/deploy/homelab
+docker compose --profile llm up -d ollama
+docker compose exec ollama ollama pull qwen2.5:1.5b
+```
+
+Ollama is behind a profile, so it stays off unless asked for: it is something to turn on when you want it, not something competing for memory all day. It binds to loopback only, like everything else here — a model endpoint with no authentication has no business on the home network.
+
+Then point the comparison at it:
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+python -m honeypot_ai.classify.llm --provider ollama --models
+python -m honeypot_ai.classify.llm --provider ollama --sample 10 --seed 1
+```
+
+### Testing the defences against prompt injection
+
+Attacker text crosses into a prompt here, so the pipeline ships with an adversarial corpus and a way to score a model against it:
+
+```bash
+python -m honeypot_ai.classify.llm --injection-suite --provider gemini
+python -m honeypot_ai.classify.llm --injection-suite --provider ollama
+```
+
+Twelve hostile sessions, each with two labels — what the session is, and what the injection wants the model to say — so every outcome is one of *resisted*, *injected* or *confused*. It needs no database and no sessions of your own; the corpus is synthetic.
+
+A model that scores badly is not a reason to stop using it, and a model that scores perfectly is not a guarantee. The reasoning is in [`docs/prompt-injection.md`](../../docs/prompt-injection.md), along with what the architecture bounds regardless of how the model behaves.
+
+### Comparing the two fairly
+
+`--seed` is what makes it a comparison rather than two unrelated samples:
+
+```bash
+python -m honeypot_ai.classify.llm --provider gemini --sample 10 --seed 1
+python -m honeypot_ai.classify.llm --provider ollama --sample 10 --seed 1
+```
+
+Both runs get the same ten sessions, the same prompt, the same parser and the same validation, so a difference in the numbers is a difference between the models. Three figures come out of each run — availability, median latency and agreement with the rules — and the honest summary needs all three. A model that is right whenever it answers and answers half the time is not better than one that is slightly worse and always answers; which is preferable depends on what the pipeline is for, and saying so is part of the result.
+
+**If answers come back truncated,** the model is being cut off rather than writing badly, and the error now says so and quotes what it had written — because a model rambling and a model looping look identical from the outside and need different fixes.
+
+Both are guarded against. The rationale has a length cap and the prompt asks for one short sentence; the behaviour list has a ceiling, because an array with no bound lets a grammar-constrained model repeat enum values indefinitely. The token limit is deliberately tight: a correct answer is about a hundred tokens, so raising the limit never fixes a loop, it only pays for more of it.
+
+Truncation is treated as permanent rather than retried. Generation runs at temperature zero, so an identical request returns an identical answer — retrying a deterministic failure costs another minute and a half to arrive at the same place.
+
+Record what you measure, including the models that were too slow to use. The first round is written up in [`docs/model-comparison.md`](../../docs/model-comparison.md): `qwen2.5:1.5b` runs here at about 23 seconds a session, `llama3.2:3b` does not run at all — 2.0 GB of weights on 2.5 GB of free memory is a machine swapping, not a model thinking. "A 7B model took four minutes per session on this laptop" is a finding, and it is the sort of thing nobody publishes and everybody rediscovers.
+
+## Storing the labels
+
+Everything above produces a label and prints it. This is where labels start
+being kept.
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+
+python -m honeypot_ai.classify --dry-run             # rehearse
+python -m honeypot_ai.classify                       # the rule engine
+python -m honeypot_ai.classify --classifier gemini --limit 200
+```
+
+Safe to re-run. A session already labelled by that classifier under the
+current taxonomy is skipped, so the rules can run on a timer while a metered
+model is pointed at a bounded number of sessions by hand.
+
+### Every classifier keeps its own answer
+
+Labels are keyed by `(session_id, classifier)`, so the rule engine, each model
+and — from v0.5.0 — a human analyst all write their own row for the same
+session. Running all three leaves three labels per session.
+
+That is the point. Storing a single "best" label would be smaller and would
+throw away the only part worth having: where two classifiers agree there is
+nothing to learn, and where they disagree is what the evaluation is made of.
+The disagreement has already earned its keep once, when a model spotted a
+complete dropper chain the rules had missed entirely.
+
+The classifier's name carries its model — `gemini:gemini-3.5-flash-lite`,
+`ollama:qwen2.5:1.5b` — so upgrading a model starts a new series rather than
+silently rewriting what the old one concluded. Comparing two versions of a
+model later is then a query.
+
+```sql
+-- Where do the rules and the model disagree?
+SELECT r.session_id, r.intent AS rules, g.intent AS model
+FROM session_labels r
+JOIN session_labels g USING (session_id)
+WHERE r.classifier = 'rules'
+  AND g.classifier LIKE 'gemini:%'
+  AND r.intent <> g.intent;
+```
+
+### Labels know which taxonomy they were written under
+
+Each row stores `taxonomy_version`. When the taxonomy changes — it has already
+changed twice while being derived — every stored label was produced against a
+vocabulary that no longer exists, and the worker treats those rows as pending
+and relabels them.
+
+Without that, nothing looks wrong. Every row is still well-formed, every label
+is still in the enum, every constraint still passes, and the counts are a
+mixture of two schemes. It is the same silent-staleness failure as a
+geolocation database that quietly stopped updating, and a column is a cheap
+way to avoid it.
+
+If the *rules* change but the vocabulary does not, there is no version to bump,
+so relabelling is explicit:
+
+```bash
+python -m honeypot_ai.classify --reclassify
+```
+
+### On a timer
+
+Only the rule engine is scheduled. It is deterministic, costs nothing and
+takes milliseconds per session, so labelling everything as it arrives is free:
+
+```bash
+sudo install -m 0644 cowrie-classify.service /etc/systemd/system/
+sudo install -m 0644 cowrie-classify.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowrie-classify.timer
+systemctl list-timers 'cowrie-*'
+```
+
+The language-model classifiers are deliberately left off the timer. Gemini is
+metered and Ollama takes twenty seconds a session on this hardware, so both are
+run deliberately over a bounded number of sessions. A timer that quietly spends
+a quota is a worse failure than a timer that does not exist — and this
+deployment has already paid to learn that, two sections up.
 
 ## Retention
 

@@ -1,0 +1,289 @@
+# Attack taxonomy
+
+These are the labels this project predicts. They were derived from 7,735 real sessions captured by this honeypot in its first week, not chosen from a list of categories that sounded plausible and fitted to the data afterwards. That ordering is the point: categories invented first tend to describe the analyst rather than the attacks.
+
+The code is in [`src/honeypot_ai/classify/taxonomy.py`](../src/honeypot_ai/classify/taxonomy.py), which everything else imports from, so a category cannot drift between the rule engine, the language model, the labelling tool and the evaluation.
+
+## What the data actually looks like
+
+| | Sessions | Share |
+|---|---:|---:|
+| Total | 7,735 | |
+| Authenticated | 6,924 | 90% |
+| Issued at least one command | 6,602 | 85% |
+| Issued more than five | 911 | 12% |
+| Issued **exactly one** | 5,569 | 72% |
+
+Two things follow from that table, and both shape everything downstream.
+
+**This honeypot is permissive, so almost everyone gets in.** Ninety per cent of sessions authenticate. "Brute force that failed" is therefore not a useful category here — what varies is what happens *after* the door opens.
+
+**Seventy-two per cent of sessions run exactly one command**, and that command is overwhelmingly `uname -s -v -n -r -m`. A classifier that answers "fingerprinting" to everything, always, scores about 68% accuracy while knowing nothing. That number is the floor, and it is why accuracy is not the metric this project reports: **macro-averaged F1** is, because it weights the rare classes — which are the interesting ones — equally with the flood.
+
+It also determines how the labelled set in v0.5.0 gets built. Two hundred sessions drawn at random would be roughly 136 fingerprinting probes and one or two of everything else, which measures nothing. The sample must be **stratified**.
+
+## The two axes
+
+A session gets exactly one **intent** and any number of **behaviours**.
+
+Intent answers *how far did this actor get, and what were they after?* It is single-valued because evaluation needs one correct answer per session.
+
+Behaviour answers *what did they actually do?* It is multi-valued, and it is the unit that maps to MITRE ATT&CK techniques in v0.6.0. Keeping the two apart means the ATT&CK mapping can grow without renegotiating the labels the classifier predicts.
+
+A third, independent field records whether a human appeared to be at the keyboard: `automated`, `interactive` or `unknown`. In this dataset essentially everything is automated, and that is itself a finding worth stating rather than assuming.
+
+## Intents
+
+### `protocol_probe`
+
+Spoke a different protocol at the port entirely.
+
+```
+User-Agent: Mozilla/5.0 zgrab/0.x
+Accept: */*
+Accept-Encoding: gzip
+```
+
+```
+From: <sip:nm@nm>;tag=root
+CSeq: 42 OPTIONS
+Max-Forwards: 70
+```
+
+Internet-wide census scanners send HTTP or SIP at whatever port answers, so the honeypot records request headers where commands would be. The actor never engaged with the emulated shell and may not know what it reached.
+
+This has its own category rather than living in `other` because conflating "ran `uname` on my host" with "spoke HTTP at my SSH port" would quietly inflate every attack statistic this project produces. It sits at the bottom of the precedence order: this is the least engagement a session can have.
+
+### `credential_access`
+
+Logged in and nothing more. No command was ever issued.
+
+Not the same as "failed to log in". These mostly authenticated successfully and then disconnected — they were harvesting working credentials, not using them. 1,133 sessions, about 15%.
+
+### `fingerprinting`
+
+Established what the host is, then left.
+
+```
+uname -s -v -n -r -m
+```
+
+That single line, alone in a session, accounts for 4,874 of them, with another 368 as `/bin/./uname -s -v -n -r -m`. No attempt to act on the machine. This is a census: somebody building an inventory of what is reachable on the internet, to be revisited later.
+
+### `shell_probing`
+
+Tried to obtain or confirm a usable shell.
+
+```
+enable ; system ; shell ; sh ; linuxshell
+```
+
+Those words are not Unix commands. They are the escape words for the restricted menu shells that routers, DVRs and IP cameras ship with, tried in sequence in the hope that one of them drops the caller into something real. 490 sessions follow this exact nine-command pattern. `busybox` probes belong here too: `/bin/busybox HISILICON` (135 sessions) is checking for a chipset found in cheap surveillance hardware.
+
+The actor does not yet know whether it has a shell. Everything else is contingent on finding out.
+
+### `resource_profiling`
+
+Measured what the machine is worth.
+
+The distinction from fingerprinting is identity versus value: one asks what the host *is*, this asks what it is *good for*. One script in this dataset, appearing 271 times, collects architecture, uptime, core count, CPU model from `lscpu` and `/proc/cpuinfo`, login history via `last` — and then this:
+
+```sh
+gpu_info=$( (lspci | grep -i vga; lspci | grep -i nvidia; ...) )
+```
+
+A GPU probe on a random internet host is mining reconnaissance. Nothing else wants to know whether an anonymous SSH box has an NVIDIA card.
+
+### `staging`
+
+Prepared the ground for a payload.
+
+```sh
+>/dev/.f && chmod 777 /dev/.f && /dev/.f && cd /dev/;
+>/var/.f && chmod 777 /var/.f && /var/.f && cd /var/;
+>/var/run/.f && chmod 777 /var/run/.f && /var/run/.f && cd /var/run/;
+```
+
+Forty-four sessions sweep eleven directories this way, looking for one that is both writable and executable — the place a dropped binary will be able to run from. The same intent appears as a shell-capability test, writing a throwaway script and executing it to confirm the machine can run what it is about to be sent.
+
+The payload need not have arrived. Outbound traffic is blocked on this sensor, so `wget` and `curl` fail; the *attempt* is what is recorded, and for classification the attempt is what matters.
+
+### `persistence`
+
+Installed a way back in.
+
+```sh
+cd ~; chattr -ia .ssh; lockr -ia .ssh
+cd ~ && rm -rf .ssh && mkdir .ssh && echo "ssh-rsa AAAA…mdrfckr" >> .ssh/authorized_keys
+```
+
+Seventy-nine sessions, three commands each, always the same key. Note the order: the immutable flags come off first, in case a previous occupant locked the directory. This is the furthest an actor gets, and the only intent that outlives the session.
+
+### `other`
+
+Does not fit the above. Deliberately not a dumping ground: every `other` is a prompt to ask whether the taxonomy is missing something. **If this class grows past a few per cent of the labelled set, the taxonomy is wrong and should change** — rather than the sessions being forced into categories that do not fit them.
+
+## The precedence rule
+
+Most sessions do more than one thing, so the single label needs a tie-break that two different people would apply the same way.
+
+**The intent is the furthest point reached**, in this order:
+
+```
+protocol_probe → credential_access → fingerprinting → shell_probing
+    → resource_profiling → staging → persistence
+```
+
+A session that runs `uname`, then writes an SSH key, is `persistence` — not `fingerprinting` — because the fingerprinting was in service of the rest.
+
+That is a decision, not a fact. The alternative, labelling by whatever the session spent most of its commands on, would classify that same session as fingerprinting, which is useless for triage: the thing you need to know is that somebody left a key behind. Recorded here so the choice stays visible instead of living in one labeller's habits.
+
+## Behaviours
+
+| Group | Labels |
+|---|---|
+| Discovery | `host_enumeration`, `user_enumeration`, `architecture_detection`, `cpu_profiling`, `gpu_detection`, `uptime_check`, `login_history_check`, `process_enumeration` |
+| Shell acquisition | `shell_escape`, `busybox_probe`, `marker_echo` |
+| Staging | `writable_dir_hunt`, `permission_change`, `execution_test`, `payload_download`, `payload_execution` |
+| Persistence | `ssh_dir_reset`, `immutable_flag_clear`, `authorized_keys_write`, `cron_install`, `account_creation` |
+| Holding the box | `competitor_kill`, `history_clearing` |
+| Reaching outwards | `lateral_scan` |
+
+Two of these deserve a note.
+
+`marker_echo` covers a session echoing a fixed string to confirm the shell executes and to announce itself to its own operator. In this dataset that is `echo -e "\x47\x41\x59\x46\x47\x54"` (84 sessions) — the hex spells a word that identifies a well-known botnet family — and `echo xsec` (135 sessions).
+
+`competitor_kill` is malware removing other malware. Thirty sessions here run a loop over `/proc`, find every process whose executable has been deleted from disk, and kill it — a precise description of a fileless cryptominer, and of nothing legitimate. It is a behaviour rather than an intent because it is almost never the point of a session, only something done on the way.
+
+Behaviours are the layer that gets ATT&CK technique identifiers attached in v0.6.0, validated against the official data rather than typed from memory. No identifiers appear here, so there is one place to get them wrong instead of two.
+
+## What this taxonomy does not do
+
+It does not attribute sessions to campaigns or families. The data clearly contains distinct, recognisable actors — the nine-command escape sequence, the `.f` directory sweep, the single recurring SSH key — but naming them is clustering, which is v1.2.0, and guessing at family names from fragments is how threat reports end up wrong.
+
+It does not describe severity. A persistence attempt is further along than a fingerprint, which is what precedence captures; whether it is *worse* depends on a real system's context, and this honeypot has none.
+
+## Revision: what the first full run changed
+
+The rules were run over the whole corpus — 11,991 sessions by then — and 2.5% came back as `other`, above the threshold this document sets for "the taxonomy is wrong and should change". Reading those sessions produced four findings, which is the loop working rather than failing.
+
+**Scanners speaking other protocols.** HTTP and SIP requests arriving at ports 22 and 23, from census tools like zgrab. Not attacks on the honeypot in any sense this taxonomy was built for, and counting them as reconnaissance would have inflated every figure. Now `protocol_probe`.
+
+**Ordinary looking around.** `pwd`, `ls -la /`, `netstat -tulpn`, `hostname`, `ssh -V`. Fingerprinting, plainly, but the first pass had no patterns for filesystem or network discovery — and the host-enumeration pattern required `hostnamectl`, so bare `hostname` fell straight through. Two new behaviours and one fixed pattern.
+
+**The same attack, obfuscated.** Eleven of the first twenty unlabelled sessions were this:
+
+```
+lghkel
+zpz}ld
+zalee
+za
+```
+
+Decoded with a single-byte XOR of `0x09`, that is `enable`, `system`, `shell`, `sh` — the identical restricted-shell escape sequence as every other Mirai-family session in the corpus, sent through a client that obfuscates it. The rule engine now tries that decode, under two constraints that matter: the decoded text must be printable, and it must match a rule that already exists. The decoder can therefore surface a match that was missed, but can never invent a category or override a plain-text one. A decoder free to reinterpret anything eventually reinterprets something real.
+
+Sessions decoded this way also carry an `obfuscated_command` behaviour, because choosing to obfuscate is itself a thing the actor did and worth counting.
+
+**A number that looks wrong and is not.** `gpu_detection` fires on 344 sessions but `resource_profiling` is the final label on only 72. That is the precedence rule doing its job: most of the hardware surveys go on to write and execute a test script, so they land on `staging`. The behaviour counts and the intent counts answer different questions, and this is the clearest example of why both exist.
+
+## Second pass: the sessions that were asking about us
+
+After those fixes `other` fell from 2.5% to 0.8% and rule coverage rose to 97.4%. What remained was almost entirely one family, four commands, each appearing in its own session:
+
+```
+env | head -10
+mount | head -5
+ls /proc/self 2>/dev/null | wc -l
+history | tail -5
+```
+
+These are not reconnaissance of the host. They are reconnaissance of the *shell*. `mount` reveals an overlay filesystem, `env` leaks container variables, `/proc/self` is conspicuously thin inside a jail, and an empty `history` means nobody has ever actually used the account. All four ask the same question: **am I in a honeypot?**
+
+That needed no new intent. `shell_probing` was already defined as "tried to obtain or confirm a usable shell", and confirming the shell is genuine is exactly that — so this became a behaviour, `sandbox_check`, under the intent that already covered it. Resisting the urge to add a category for every interesting finding is most of what keeps a taxonomy usable.
+
+It is worth sitting with what these sessions mean. Everything else in this corpus is a bot executing a fixed script against whatever answered. These are checking whether the thing that answered is real — which means somebody, somewhere, built the expectation of honeypots into their tooling. The honeypot is being studied back.
+
+Two smaller fixes came with it. The filesystem pattern anchored to end-of-line, so `ls /proc/self 2>/dev/null | wc -l` fell through for having a pipe after it. And a session whose only command is `exit` is now `credential_access`: issuing nothing but a way out is indistinguishable from issuing nothing at all.
+
+### Where this stops
+
+The remaining `other` is a long tail, and it stays that way. Writing a rule for each surviving session would produce a classifier that scores beautifully on this corpus and generalises to nothing — the rule engine's job is to be a fair baseline, not to win. Reaching the last fraction of a per cent by reading intent rather than matching strings is the work the language model is for, and the comparison is only honest if the baseline stops at a defensible point rather than being tuned until it looks good.
+
+## Where models disagree with the rules
+
+The first side-by-side run against a language model produced two disagreements out of three, and both were the same mistake: the model chose the **most prominent** behaviour rather than the **furthest point reached**. A session that surveys the hardware and then writes and executes a script came back as `resource_profiling`; one that ends in staging came back as `shell_probing`.
+
+That is the precedence rule not being applied, and it is worth recording here rather than only in the comparison, because it says something about the taxonomy and not only about the model: the rule is the single least intuitive thing in this document, and the one most likely to be got wrong by anybody — human or model — labelling quickly.
+
+It was deliberately not fixed by rewriting the prompt until the model agreed. The rule engine is the baseline being compared against, not the answer key, and tuning a classifier until it matches its own baseline measures imitation rather than skill. Which of the two is right on those sessions is a question for the labelled set in v0.5.0.
+
+## Third pass: a campaign, and a rule that missed by one character
+
+Storing labels for the first time put 31,774 sessions through the rules at once, and `other` came back at **8.17%** — far above the threshold. The first reading was that the taxonomy had been wrong for weeks. It had not. Measured by day:
+
+| Day | `other` | Total | Share |
+|---|---:|---:|---:|
+| 2026-10-01 | 2 | 4,285 | 0.0% |
+| 2026-10-05 | 6 | 3,450 | 0.2% |
+| 2026-10-06 | 15 | 4,437 | 0.3% |
+| 2026-10-16 | 2 | 1,637 | 0.1% |
+| 2026-10-19 | 7 | 2,584 | 0.3% |
+| **2026-10-20** | **2,558** | **6,484** | **39.5%** |
+| 2026-10-21 | 5 | 8,897 | 0.1% |
+
+One day. Every other day under 0.3%. The 8.17% was a single campaign averaged across three weeks, and the pooled figure described no day that had actually happened.
+
+That is a measurement bug as much as a classification one, and it goes both ways: a year from now the same 2,555 sessions would be 0.2% of the corpus and nobody would ever look at them. A campaign is a thing that happens on a *date*, so the threshold is now checked per day — `python -m honeypot_ai.classify --audit`.
+
+### What the campaign was
+
+2,594 of the 2,595 unlabelled sessions held exactly one command, and 2,555 of those were the same one:
+
+```
+echo -e "\x6F\x6B"
+```
+
+`\x6F\x6B` is `ok`. The bot asks the shell to print a two-letter string and checks that the reply is exactly that. A real shell obliges. A honeypot that does not implement `-e`, or does not decode hex escapes, prints something else and gives itself away — and the string is written in hex precisely so that a honeypot cannot cheat by recognising `ok`.
+
+The rules already had `marker_echo` for exactly this. It required **three or more** hex escapes, a threshold written around the markers then in the corpus: `GAYFGT` is six bytes, `auth_ok` is eight. `ok` is two. Two thousand five hundred and fifty-five sessions walked through a gap one character of regex wide.
+
+The lesson is not "write looser patterns". It is that a pattern written to fit the examples in front of you encodes an assumption about the examples you have not seen, and the escape valve is the only thing that ever tells you which assumption it was.
+
+### Four ways of asking the same question
+
+Widening the rule surfaced a whole family already in the corpus, all of it checking whether the shell is real:
+
+| Technique | Example | What it tests |
+|---|---|---|
+| Hex escapes | `echo -e "\x6F\x6B"` | that `-e` decodes |
+| Arithmetic expansion | `echo READY_$((41+1))` | that the shell evaluates |
+| Plain marker | `echo S_CHECK`, `echo SHELL_TEST` | that there is an echo at all |
+| Family handshake | `echo -e "\x47\x41\x59\x46\x47\x54"` | `GAYFGT` — Gafgyt/BASHLITE |
+
+The arithmetic one is the cleverest, and the only one this sensor fails. Asked directly:
+
+```
+$ echo -e "\x6F\x6B"            → ok              ✓
+$ echo -e "\x47\x41\x59..."     → GAYFGT          ✓
+$ echo TELNET_TEST_OK           → TELNET_TEST_OK  ✓
+$ echo READY_$((41+1))          → -bash: 41+1: command not found
+                                  READY_          ✗
+```
+
+A real shell prints `READY_42`. This one emits a `bash`-shaped error that no `bash` would ever produce for that input, and then a truncated string. It is a worse tell than silence: the error message is itself a fingerprint, and it reveals that `$(...)` is being parsed as command substitution rather than `$(( ))` as arithmetic.
+
+Seven sessions in the corpus used it. All seven know.
+
+That belongs to the emulator rather than to this taxonomy, so it is recorded here and tracked as a sensor issue. Arithmetic expansion now counts as `sandbox_check` — the behaviour already defined as "testing whether the shell is real" — under `shell_probing`, which already covered it.
+
+### And one genuinely loose wire
+
+`ps aux | head -10` matched `process_enumeration` and came out as `other`, because that behaviour deliberately carried no intent: looking at running processes happens at every stage, so it was thought not to indicate one.
+
+That reasoning confuses *not raising the ceiling* with *contributing nothing*. Intent is the furthest point reached, so a low-ranked intent can never lower a session that went further — a staging session that also runs `ps` is still staging. Carrying no intent at all meant a session whose only command was `ps aux` had nothing to resolve and fell through. It is now `fingerprinting`, which is what looking at processes is when it is all you did.
+
+### What changed, and what did not
+
+**No new categories.** Every one of these sessions fits a label that already existed; what was wrong was the rules, not the vocabulary. So `TAXONOMY_VERSION` does not move and stored labels are not invalidated — the fix is `--reclassify`, which re-runs the rules against the same vocabulary.
+
+Worth separating, because the escape valve fires the same way for both and they need opposite responses. A missing category means the taxonomy cannot describe what it is seeing. An under-matching rule means it can describe it perfectly well and failed to notice. The first is a design problem; the second is a bug. This was the second, twice.
