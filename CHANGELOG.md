@@ -7,20 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-27
+
+A patch release of operational fixes, all of them found by running the thing. The honeypot had been capturing four times more traffic than the database held, and two separate statements were quietly over a limit nobody had thought about.
+
 ### Fixed
 
-- **Restored the rotated-log fix, which a later change had silently reverted.** The directory support, the systemd unit and the deployment notes went in with one pull request and were overwritten by the next, because the files were rebuilt from a working tree that had been reset in between. `develop` kept the bind-parameter fixes and lost the reason they were needed: ingestion was reading only `cowrie.json` again, so the next day the homelab was switched off would have lost that day's sessions all over again.
+- **Rotated logs were synced and never read.** Cowrie rotates `cowrie.json` at midnight; ingestion was pointed at the live file alone. On a machine that runs continuously that reads everything, and on one switched on to work on the project it reads only what has happened since the last midnight — so every day the homelab was off, that day's events were rotated away before anything looked at them. Twenty-six rotated logs, almost a gigabyte, sat on disk unread: the database held 41,346 sessions out of the 115,393 actually captured. Ingestion now takes a directory and reads every log in it, oldest first.
+- A session that straddles a rotation appears as two halves, one in each file. The later half no longer overwrites the earlier one just for arriving second: Cowrie only appends, so a version with fewer commands than the stored one cannot be that session having shrunk. The larger half is kept. That is an approximation and not a merge — joining the halves would mean holding every open session across the whole set in memory — and it affects a handful of sessions a day.
+- **Ingestion failed whole on a large backlog.** Sessions were batched five hundred at a time, and every child row of those sessions went into one INSERT. The batch bounded the transaction; nothing bounded the statement. A session may carry one command or two hundred, so a backlog of scripted sessions put 15,090 commands in a single batch — 75,450 bind parameters against PostgreSQL's protocol limit of 65,535 — and `number of parameters must be between 0 and 65535` took the entire run with it rather than the batch.
+- **The same limit, in a second place.** Classification looked up which sessions already had a label with one `IN (...)` over every session in the run: 115,353 of them, and the statement was refused. It is the identical fault, in a different shape, shipped without checking whether the pattern existed elsewhere — it did, in exactly one other place. The limit and the two ways of staying under it now live in `honeypot_ai.db.limits`, and an audit found every other `IN` in the project takes a subquery, which spends no parameters at all.
+- **A later change silently reverted the rotated-log fix.** The directory support, the systemd unit and the deployment notes went in with one pull request and were overwritten by the next, because the files were rebuilt from a working tree that had been reset in between. `develop` kept the bind-parameter fixes and lost the reason they were needed.
+- `ClassifyStats` reported "relabelled for a new taxonomy" after a `--reclassify` run, where the taxonomy had not moved. The counter knows a session had a label before and nothing else, so it now says that and does not assert a cause it cannot observe.
 
 ### Changed
 
 - The README carries the real figures: 115,393 sessions from 5,845 addresses across 28 days, and 38 of them unlabelled. It said "over 31,000" because that is what the database held before the rotated logs were read.
-- A finding from 13 October 2026: a Mirai variant uploading an ARM executable through the shell itself, `echo -ne "\x7F\x45\x4C\x46..." >> .d` thirty-two bytes at a time, about 575 commands per session, then `chmod +x` and `./dvrHelper selfrep`. It swept `/proc` first, killing every process whose executable had been deleted — rival in-memory implants — before installing itself.
+- A finding from 13 October 2026, recorded in the README: a Mirai variant uploading an ARM executable through the shell itself, `echo -ne "\x7F\x45\x4C\x46..." >> .d` thirty-two bytes at a time, about 575 commands per session, then `chmod +x` and `./dvrHelper selfrep`. It swept `/proc` first, killing every process whose executable had been deleted — rival in-memory implants — before installing itself.
 - The sample-handling rule says only hashes leave the sensor. That was written for files an attacker downloads, and a payload typed in as hex never becomes a file: it arrives as ordinary session text, subject to no sample rule at all. Command logs from those sessions are now treated as samples and never published verbatim.
-
-### Fixed
-
-- **The same bind-parameter limit, in a second place.** Classification looked up which sessions already had a label with one `IN (...)` over every session in the run: 115,353 of them after the backlog was read, and the statement was refused. It is the identical fault that had just been fixed in ingestion, in a different shape, shipped without checking whether the pattern existed elsewhere — it did, in exactly one other place. The limit, and the two ways of staying under it, now live in `honeypot_ai.db.limits`, and the audit found that every other `IN` in the project takes a subquery, which spends no parameters at all.
-- **Ingestion failed whole on a large backlog.** Sessions were batched five hundred at a time, and every child row of those sessions went into one INSERT. The batch bounded the transaction; nothing bounded the statement. A session may carry one command or two hundred, so after the sensor's outage on 27 October a backlog of scripted sessions put 15,090 commands in a single batch — 75,450 bind parameters against PostgreSQL's protocol limit of 65,535 — and `number of parameters must be between 0 and 65535` took the entire run with it rather than the batch. Child rows are now split into as many statements as the limit requires. The session batch is still the transaction boundary, so atomicity is unchanged.
 
 ## [0.4.0] - 2026-10-27
 
