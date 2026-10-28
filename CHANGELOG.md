@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A labelling tool for the evaluation set**, `python -m honeypot_ai.label`. `sample` draws the set from the database; `review` and `status` need only the committed file, so labelling can happen anywhere. The method is in `docs/evaluation-set.md`, and four decisions in it carry the weight:
+  - Labelling is **blind**. The labeller sees nothing a classifier could not: not the rules' label, not any model's, not the address's country or reputation, not how common the sequence is. A label formed by glancing at the rules' answer measures the labeller's persuadability, and a test fails if the review screen ever shows it.
+  - Items are **distinct behaviours with weights**. Sessions are grouped by what they did, so 2,555 copies of one command cost one label, and the evaluation can report accuracy per behaviour and per session — different numbers, both worth having.
+  - The sample has a **uniform** part, drawn in proportion to traffic, and a **stratified** part with a floor per class. Strata come from the rules, which makes their precision estimate unbiased and their recall estimate biased; the uniform part exists partly to correct that, and the caveat is written down where the results will be.
+  - Export is **anonymised** and cannot be skipped: public addresses become documentation addresses consistently, and payloads typed in as hex or base64 are cut to a few bytes and a hash. A test checks that anonymising never changes what the rules conclude.
+- The intent definitions live in one place and both the language-model prompt and the labelling tool read them, so the human and the model are judged against the same words. The prompt is byte-for-byte unchanged by the move.
+
+### Fixed
+
+- **The rules filed the 13 October dropper as `shell_probing`.** Running a payload was only recognised for files ending in `.sh` or `.bin`, and IoT payloads are called `.d`, `dvrHelper` and `mirai.arm7`: a session that wrote an ARM binary, made it executable and ran it never reached `staging`. Execution is now any file run from the current directory at a command boundary, or any script handed to a shell by name. Found while testing the labelling tool and fixed before the evaluation sample was drawn — the only point at which changing a rule on the strength of having looked at the data is legitimate.
+
 ## [0.4.1] - 2026-10-27
 
 A patch release of operational fixes, all of them found by running the thing. The honeypot had been capturing four times more traffic than the database held, and two separate statements were quietly over a limit nobody had thought about.
