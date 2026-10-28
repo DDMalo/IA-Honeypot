@@ -196,9 +196,26 @@ RULES: tuple[Rule, ...] = (
     ),
     _rule(
         Behaviour.PAYLOAD_EXECUTION,
-        r"\b(sh|bash|ash)\s+\S*\.sh\b|\./\S+\.(sh|bin)\b",
+        # Running a file from the current directory, at the start of a command,
+        # whatever it is called. The first version required `.sh` or `.bin`,
+        # and IoT payloads have neither: `./.d`, `./dvrHelper`, `mirai.arm7`.
+        # The 13 October dropper wrote an ARM binary, made it executable and
+        # ran it, and was filed as shell_probing because nothing matched the
+        # last step. Found while testing the labelling tool, before the
+        # evaluation sample was drawn — which is the only point at which
+        # changing a rule on the strength of having looked at the data is
+        # legitimate.
+        # A new line counts as a command boundary, so a pasted script that
+        # runs `./payload` on its own line is caught too.
+        r"(?:^|[;&|\n][ \t]*)\./[\w.-]+"
+        # A script handed to a shell by name. `sh` alone is the shell escape
+        # and is not matched; an argument starting with `-` is an option.
+        # Horizontal whitespace only: with `\s` the shebang `#!/bin/sh` and
+        # the line after it read as `sh for`, a shell running a file called
+        # `for`, and a script that kills rival malware became a payload.
+        r"|\b(?:sh|bash|ash)[ \t]+(?!-)[\w./-]+",
         Intent.STAGING,
-        "running what was just fetched",
+        "running what was just fetched or written",
     ),
     _rule(
         Behaviour.PAYLOAD_DOWNLOAD,

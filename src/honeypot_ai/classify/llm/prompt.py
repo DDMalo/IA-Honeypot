@@ -36,7 +36,7 @@ import re
 import secrets
 
 from honeypot_ai.classify.facts import SessionFacts
-from honeypot_ai.classify.taxonomy import Behaviour, Intent, Operator
+from honeypot_ai.classify.taxonomy import INTENT_DEFINITIONS, Behaviour, Intent, Operator
 
 MAX_COMMANDS = 60
 MAX_COMMAND_CHARS = 400
@@ -50,6 +50,12 @@ def _catalogue(values: object) -> str:
     return ", ".join(sorted(str(value) for value in values))  # type: ignore[attr-defined]
 
 
+#: Built from the shared definitions rather than written out here, so the
+#: model and the person labelling the evaluation set read the same words.
+_INTENT_TABLE = "\n".join(
+    f"  {intent.value:<19} {definition}" for intent, definition in INTENT_DEFINITIONS.items()
+)
+
 SYSTEM_PROMPT = f"""\
 You classify sessions captured by an SSH/Telnet honeypot.
 
@@ -62,14 +68,7 @@ order:
   protocol_probe -> credential_access -> fingerprinting -> shell_probing \
 -> resource_profiling -> staging -> persistence
 
-  protocol_probe      spoke HTTP, SIP or another protocol; never used the shell
-  credential_access   logged in and issued nothing
-  fingerprinting      established what the host is, then left
-  shell_probing       tried to get, or confirm, a usable shell
-  resource_profiling  measured what the machine is worth (CPU, GPU, uptime)
-  staging             prepared for a payload: writable directory, chmod, fetch
-  persistence         installed a way back in: authorized_keys, cron, accounts
-  other               genuinely fits none of the above
+{_INTENT_TABLE}
 
 A session that fingerprints and then writes an SSH key is persistence, not \
 fingerprinting: the earlier steps served the later one.
