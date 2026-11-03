@@ -32,6 +32,13 @@ KEY` marker to its `END`, everything is replaced, and the markers themselves
 are rewritten so the repository's own private-key hook does not have to be
 the thing that catches it.
 
+A payload can also arrive as a base64 heredoc (`base64 -d > file <<.`), one
+line per command. Judging each line by its look is not enough: padding in a
+binary encodes to runs of `A`, with no lower case or digits to give it away.
+Once such a heredoc opens, every base64-looking line is replaced until its
+delimiter. Browser versions in a User-Agent (`Chrome/120.0.0.0`) parse as
+IPv4 addresses and are not addresses, so they are left alone.
+
 Nothing of an encoded run is kept, not even a prefix. Keeping sixteen
 characters of every line of a ten-line key keeps roughly a quarter of it, in
 scattered positions, and partial-key-exposure attacks on RSA work from
@@ -81,6 +88,19 @@ _IPV4 = re.compile(r"(?<![\d.])(?:\d{1,3}\.){3}\d{1,3}(?![\d.])")
 _IPV6 = re.compile(r"(?<![0-9A-Fa-f:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?![0-9A-Fa-f:])")
 _HEX_RUN = re.compile(r"(?:\\x[0-9A-Fa-f]{2})+")
 _BASE64_RUN = re.compile(rf"[A-Za-z0-9+/]{{{MIN_BASE64_RUN},}}={{0,2}}")
+# `base64 -d ... <<DELIM` (also `-D`, `--decode`, quoted or dashed delimiters):
+# what follows, up to DELIM, is the payload.
+_B64_HEREDOC = re.compile(
+    r"base64\s+(?:\S+\s+)*?(?:-[dD]|--decode)\b.*?(?<!<)<<(?!<)-?\s*(?:'([^']+)'|\"([^\"]+)\"|(\S+))"
+)
+_B64_LINE = re.compile(r"[A-Za-z0-9+/]{4,}={0,2}")
+# A version number that `ipaddress` accepts as an address, in a User-Agent.
+_VERSION_PREFIX = re.compile(
+    r"(?:Chrome|Chromium|Safari|Version|OPR|Edg|Edge|EdgA|Firefox|CriOS|FxiOS|SamsungBrowser|rv)[/:]$"
+)
+#: Base64 of six zero bytes. Binaries are full of padding, and a line of it has
+#: neither lower case nor digits, which the mixture test alone would let through.
+_ZERO_PADDING = "AAAAAAAA"
 _PEM_BEGIN = re.compile(r"-----BEGIN ([A-Z0-9 ]*PRIVATE KEY)-----")
 _PEM_END = re.compile(r"-----END [A-Z0-9 ]*PRIVATE KEY-----")
 _PEM_BLOCK = re.compile(
@@ -129,6 +149,8 @@ class Anonymiser:
             address = ipaddress.IPv4Address(text)
         except ValueError:
             return text  # 999.1.1.1 is not an address, whatever it looks like
+        if _is_browser_version(match):
+            return text  # Chrome/120.0.0.0 is a version, not a host
         return self._placeholder_v4(str(address)) if address.is_global else text
 
     def _replace_v6(self, match: re.Match[str]) -> str:
@@ -148,7 +170,7 @@ class Anonymiser:
 
     def facts(self, facts: SessionFacts) -> SessionFacts:
         """The same session, safe to commit."""
-        commands = redact_private_keys(facts.commands)
+        commands = redact_base64_heredocs(redact_private_keys(facts.commands))
         return replace(
             facts,
             commands=tuple(self.text(command) for command in commands),
@@ -201,6 +223,51 @@ def redact_private_keys(commands: tuple[str, ...]) -> tuple[str, ...]:
     return tuple(out)
 
 
+def _is_browser_version(match: re.Match[str]) -> bool:
+    """`Chrome/120.0.0.0` has four dotted numbers and is no address.
+
+    Only inside something that is plainly a User-Agent (it has `Mozilla/`
+    before it), so a real address after a path that happens to be called
+    `Chrome/` is still replaced.
+    """
+    before = match.string[: match.start()]
+    return "Mozilla/" in before and _VERSION_PREFIX.search(before) is not None
+
+
+def redact_base64_heredocs(commands: tuple[str, ...]) -> tuple[str, ...]:
+    """Replace the lines of a payload delivered through `base64 -d <<DELIM`.
+
+    The honeypot logs a heredoc one line per command, and a line of 64
+    characters is under any single-string threshold. Some lines are
+    zero-padding and have neither lower case nor digits, so the mixture test
+    misses them: the first real sample held four such lines of an ELF binary.
+    Once a decoding heredoc has opened, every line that looks like base64 is
+    replaced, until the delimiter or the first line that is something else.
+    """
+    out: list[str] = []
+    delimiter: str | None = None
+
+    for command in commands:
+        if delimiter is None:
+            opener = _B64_HEREDOC.search(command)
+            if opener is not None:
+                delimiter = next(group for group in opener.groups() if group)
+            out.append(command)
+            continue
+
+        stripped = command.strip()
+        if stripped == delimiter:
+            delimiter = None
+            out.append(command)
+        elif _B64_LINE.fullmatch(stripped):
+            out.append(f"<base64: {len(stripped)} chars sha256:{_short_hash(stripped.encode())}>")
+        else:
+            delimiter = None
+            out.append(command)
+
+    return tuple(out)
+
+
 def _truncate_hex(match: re.Match[str]) -> str:
     run = match.group(0)
     count = len(run) // 4  # every escape is four characters: \xNN
@@ -212,6 +279,8 @@ def _truncate_hex(match: re.Match[str]) -> str:
 
 
 def _looks_encoded(run: str) -> bool:
+    if _ZERO_PADDING in run:
+        return True
     return (
         any(c.isupper() for c in run)
         and any(c.islower() for c in run)
