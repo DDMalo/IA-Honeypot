@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`review --intent-only`** asks only for the intent and records behaviours as not labelled (`null`), which the evaluation must not read as "none". Intent is one choice in eight and the primary metric; behaviours are any of thirty and most of a labelling sitting. The first labelling round uses it, and behaviours are evaluated later or not at all.
 - Two rule gaps found after the rules were frozen are written into `docs/evaluation-set.md` as predictions, before any label exists: base64-heredoc delivery is read as `resource_profiling`, and `scp` is not recognised as a download. A gap announced before the measurement is a result; one patched after it is a number nobody can trust.
 
 ### Added

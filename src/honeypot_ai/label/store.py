@@ -39,7 +39,11 @@ class HumanLabel:
 
     sample_id: str
     intent: Intent
-    behaviours: frozenset[Behaviour]
+    #: `None` means behaviours were not labelled, which is different from
+    #: "labelled, and there were none" (an empty set). An evaluation that read
+    #: the first as the second would score every behaviour a classifier found as
+    #: a false positive.
+    behaviours: frozenset[Behaviour] | None
     operator: Operator
     labeller: str
     labelled_at: datetime
@@ -113,7 +117,9 @@ def append_label(label: HumanLabel, path: Path = DEFAULT_LABELS) -> None:
     record = {
         "sample_id": label.sample_id,
         "intent": label.intent.value,
-        "behaviours": sorted(b.value for b in label.behaviours),
+        "behaviours": (
+            None if label.behaviours is None else sorted(b.value for b in label.behaviours)
+        ),
         "operator": label.operator.value,
         "labeller": label.labeller,
         "labelled_at": label.labelled_at.isoformat(),
@@ -138,7 +144,11 @@ def read_labels(path: Path = DEFAULT_LABELS) -> list[HumanLabel]:
                 HumanLabel(
                     sample_id=record["sample_id"],
                     intent=Intent(record["intent"]),
-                    behaviours=frozenset(Behaviour(b) for b in record["behaviours"]),
+                    behaviours=(
+                        None
+                        if record["behaviours"] is None
+                        else frozenset(Behaviour(b) for b in record["behaviours"])
+                    ),
                     operator=Operator(record["operator"]),
                     labeller=record["labeller"],
                     labelled_at=datetime.fromisoformat(record["labelled_at"]),

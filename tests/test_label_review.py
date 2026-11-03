@@ -100,6 +100,39 @@ def test_an_answer_is_saved_as_soon_as_it_is_given(tmp_path: Path) -> None:
     assert saved[0].operator is Operator.AUTOMATED
 
 
+def test_intent_only_never_asks_for_behaviours(tmp_path: Path) -> None:
+    """Intent, operator, notes: three answers per item, not four."""
+    replies = iter(["6", "a", "", "q"])
+    asked: list[str] = []
+
+    def ask(prompt: str) -> str:
+        asked.append(prompt)
+        return next(replies)
+
+    labels = tmp_path / "labels.jsonl"
+    review(
+        [item("one"), item("two")], set(), "david", ask, lambda _: None, labels, intent_only=True
+    )
+
+    assert not any("behaviours" in prompt for prompt in asked)
+    saved = read_labels(labels)
+    assert [label.intent for label in saved] == [Intent.STAGING]
+
+
+def test_behaviours_not_labelled_are_not_the_same_as_none(tmp_path: Path) -> None:
+    """Read back as "none found", an unlabelled set would make every behaviour
+    a classifier reports look like a false positive."""
+    path = tmp_path / "labels.jsonl"
+    append_label(HumanLabel("one", Intent.STAGING, None, Operator.UNKNOWN, "david", now()), path)
+    append_label(
+        HumanLabel("two", Intent.STAGING, frozenset(), Operator.UNKNOWN, "david", now()), path
+    )
+
+    one, two = read_labels(path)
+    assert one.behaviours is None
+    assert two.behaviours == frozenset()
+
+
 def test_skipping_saves_nothing_and_moves_on(tmp_path: Path) -> None:
     stats, _, labels = run([item("one"), item("two")], ["s", "6", "", "a", ""], tmp_path)
     assert stats.skipped == 1

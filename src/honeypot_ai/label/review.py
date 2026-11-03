@@ -177,10 +177,16 @@ def _ask_until[T](ask: Ask, say: Say, prompt: str, parse: Callable[[str], T | No
         say("  not understood — a number, a name, or ? for the list")
 
 
-def label_one(item: SampleItem, labeller: str, ask: Ask, say: Say) -> HumanLabel:
+def label_one(
+    item: SampleItem, labeller: str, ask: Ask, say: Say, *, intent_only: bool = False
+) -> HumanLabel:
     say(render(item.facts))
     intent = _ask_until(ask, say, "intent [1-8, ?]: ", parse_intent)
-    behaviours = _ask_until(ask, say, "behaviours [numbers, blank for none]: ", parse_behaviours)
+    behaviours = (
+        None
+        if intent_only
+        else _ask_until(ask, say, "behaviours [numbers, blank for none]: ", parse_behaviours)
+    )
     operator = _ask_until(
         ask, say, "operator [a]utomated [i]nteractive [u]nknown: ", parse_operator
     )
@@ -216,15 +222,22 @@ def review(
     ask: Ask,
     say: Say,
     labels_path: Path = DEFAULT_LABELS,
+    *,
+    intent_only: bool = False,
 ) -> ReviewStats:
-    """Label every item not yet done, saving each answer as it is given."""
+    """Label every item not yet done, saving each answer as it is given.
+
+    `intent_only` skips the behaviours question and records them as not
+    labelled. Intent is one choice in eight; behaviours are any of thirty, and
+    most of the time a labelling sitting takes.
+    """
     todo = [item for item in items if item.sample_id not in done]
     stats = ReviewStats(remaining=len(todo))
 
     for position, item in enumerate(todo, start=1):
         say(f"\n── {position}/{len(todo)} · {item.sample_id} " + "─" * 40)
         try:
-            label = label_one(item, labeller, ask, say)
+            label = label_one(item, labeller, ask, say, intent_only=intent_only)
         except Skip:
             stats.skipped += 1
             continue
