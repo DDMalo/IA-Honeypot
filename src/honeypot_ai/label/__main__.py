@@ -1,7 +1,7 @@
 """Build the evaluation set and label it.
 
     python -m honeypot_ai.label sample --per-class 20 --uniform 60 --seed 1
-    python -m honeypot_ai.label review --labeller david
+    python -m honeypot_ai.label review --labeller david [--intent-only]
     python -m honeypot_ai.label status
 
 `sample` needs the database and writes `eval/sample.jsonl`, anonymised and
@@ -95,7 +95,9 @@ def _review(args: argparse.Namespace) -> int:
     print("Type ? at any prompt for the definitions. s skips, q stops; every answer is saved.")
 
     try:
-        stats = review(items, done, args.labeller, input, print, args.labels)
+        stats = review(
+            items, done, args.labeller, input, print, args.labels, intent_only=args.intent_only
+        )
     except (KeyboardInterrupt, EOFError):
         print("\nStopped. Everything answered so far is saved.")
         return 0
@@ -148,6 +150,11 @@ def main(argv: list[str] | None = None) -> int:
     rev.add_argument("--labeller", required=True, help="your name, recorded on every label")
     rev.add_argument("--sample", type=Path, default=DEFAULT_SAMPLE)
     rev.add_argument("--labels", type=Path, default=DEFAULT_LABELS)
+    rev.add_argument(
+        "--intent-only",
+        action="store_true",
+        help="ask only for the intent; behaviours are recorded as not labelled",
+    )
     rev.set_defaults(run=_review)
 
     status = commands.add_parser("status", help="how far the labelling has got")
