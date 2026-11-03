@@ -3,7 +3,7 @@
 [![CI](https://github.com/DDMalo/IA-Honeypot/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/DDMalo/IA-Honeypot/actions/workflows/ci.yml)
 > SSH/Telnet honeypot with AI-powered attack classification.
 
-**Status:** v0.4.0 — running against live traffic since 30 September 2026. **115,393 real sessions** from 5,845 distinct addresses, captured, enriched and classified. See the [milestones](../../milestones) for what is next.
+**Status:** v0.4.1 — running against live traffic since 30 September 2026. **156,739 real sessions** from 5,845 distinct addresses, captured, enriched and classified. See the [milestones](../../milestones) for what is next.
 
 ## What is this?
 
@@ -17,7 +17,7 @@ The point of the project is to **measure** which approach works, rather than to 
 
 The honeypot is not a demo; it is pointed at the internet and the traffic is real. A few things that came out of it:
 
-- **A taxonomy derived from 7,735 real sessions** rather than from a list of plausible categories, with an `other` class that is measured rather than decorative. When it crosses its threshold, the taxonomy is declared wrong, not the session. That has happened three times, and the rules now leave 38 of 115,393 sessions unlabelled — but the number that matters is measured per day, because a campaign is a thing that happens on a date and an average over the corpus hides one.
+- **A taxonomy derived from 7,735 real sessions** rather than from a list of plausible categories, with an `other` class that is measured rather than decorative. When it crosses its threshold, the taxonomy is declared wrong, not the session. That has happened three times, and the rules now leave 40 of 156,739 sessions unlabelled — but the number that matters is measured per day, because a campaign is a thing that happens on a date and an average over the corpus hides one.
 - **Attackers check whether they are in a honeypot.** `mount`, `env`, `ls /proc/self`, `history` — reconnaissance of the shell rather than of the host. Somebody built the expectation of honeypots into their tooling.
 - **A campaign of 2,555 sessions in a single day**, each one command: `echo -e "\x6F\x6B"`, a shell-liveness probe written in hex so a honeypot cannot cheat by recognising `ok`. It exposed both a rule that missed by one character of regex and a way of measuring that hid a one-day spike inside a three-week average.
 - **This sensor fails one of those probes.** `echo READY_$((41+1))` returns a `bash`-shaped error where a real shell prints `READY_42`. Seven sessions in the corpus used it; all seven know.

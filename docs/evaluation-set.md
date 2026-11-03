@@ -50,12 +50,31 @@ So the order is fixed: rules and prompts are frozen, the sample is drawn, and on
 
 That rule was exercised before it was written down. Testing the labelling tool against the real corpus showed the 13 October dropper — an ARM binary written through `echo -ne`, made executable and run — filed as `shell_probing`, because the rule for running a payload only recognised files ending in `.sh` or `.bin`, and IoT payloads are called `.d` and `dvrHelper`. That was fixed before the sample was drawn. Had it surfaced while labelling, it would have been a finding to report, not a bug to fix.
 
+## Known rule gaps, written down before labelling
+
+The rules were frozen when the sample was drawn, so gaps found after that are recorded rather than fixed. Recording them here, before any label exists, turns each into a prediction the evaluation can confirm or refute — which is worth more than the fix, because a gap announced in advance and then measured is a result, while a gap discovered afterwards and quietly patched is a number nobody can trust.
+
+- **Delivery through a base64 heredoc is not recognised.** A session that writes a binary with `base64 -d > file <<.` and is cut off before running it is filed by the rules as `resource_profiling`. Writing a payload to disk is `staging`. Expected: the rules are wrong on every such item.
+- **`scp` is not recognised as a download.** The sessions in this sample that use it still reach `staging` through their other commands, so the gap is expected to show in behaviours rather than in intent.
+
 ## Safe to commit
 
 The set lives in `eval/` and is committed, because an evaluation nobody else can rerun is a claim rather than a result. Committing it means publishing attacker sessions, so export goes through an anonymiser that cannot be skipped:
 
 - **Public IP addresses** become documentation addresses (RFC 5737, RFC 3849), consistently within an export, so two sessions using one server still visibly use one server. Private and loopback addresses are kept; they identify nobody and rewriting them would change what a session means.
-- **Payloads typed in as text** — long runs of hex escapes, long base64 blobs — are cut to their first few units and replaced with their length and a short hash. Four bytes keep `\x7F ELF` recognisable and keep every hex-marker rule matching; they are nowhere near enough to reconstruct anything.
+- **Payloads typed in as text.** Long runs of hex escapes are cut to their first four bytes — enough to keep `\x7F ELF` recognisable and every hex-marker rule matching, nowhere near enough to reconstruct anything. Base64 runs of 40 characters or more, in the mixture of cases and digits that encoded data has and paths and digests do not, are replaced entirely by their length and a short hash. Nothing of them is kept.
+- **Private keys**, tracked across commands: from a `BEGIN … PRIVATE KEY` marker to its `END`, everything is replaced, and the markers themselves are rewritten.
+
+### What the first real sample found
+
+The anonymiser was written against cases invented for its tests, and the first sample drawn from the real corpus showed what that is worth. Reviewed before it was committed, it contained:
+
+- **two OpenSSH private keys**, which sessions wrote to disk and used to fetch their payloads over `scp`. One was pasted a line per command, the other as one multi-line command; every line was shorter than the 80-character threshold then in force;
+- **a 64-bit ELF binary**, delivered as `base64 -d > /tmp/hum <<.` followed by sixty-four characters of base64 per command, and two more sessions using the same technique that were cut off part-way.
+
+None of it had an IP address in it, which is what the anonymiser had been built to find. All of it was caught by reviewing the real export with a script before it reached the repository, and the rules that now catch it were checked against all 143 real items: nothing left in clear, and not one rule-engine label changed.
+
+The lesson is the one this document keeps arriving at. A safeguard tested only against the cases its author imagined is tested against its author's imagination. The export is reviewed, every time, before it is committed.
 
 A test checks that anonymising a session never changes what the rule engine concludes about it. An anonymiser that did would alter the evaluation without anyone noticing, which is the failure this whole document is about.
 
