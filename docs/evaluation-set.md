@@ -74,6 +74,15 @@ The anonymiser was written against cases invented for its tests, and the first s
 
 None of it had an IP address in it, which is what the anonymiser had been built to find. All of it was caught by reviewing the real export with a script before it reached the repository, and the rules that now catch it were checked against all 143 real items: nothing left in clear, and not one rule-engine label changed.
 
+### What the second sample found
+
+The fix was reviewed the same way, and the review was not clean either:
+
+- **four more lines of the same ELF binary.** The anonymiser called a run "encoded" only if it mixed upper case, lower case and digits. A binary is full of zero padding, which base64 writes as `AAAA…`, so the lines that were mostly padding had none of the three and went through. The rule was tuned on text that looks like a key and missed data that looks like nothing. A heredoc that decodes base64 is now treated as payload by what it is, not by what each line looks like.
+- **`Chrome/120.0.0.0` read as an IP address.** Seven User-Agents had their browser versions replaced by documentation addresses. It consumed placeholders, and it put an address where no server ever was — which a reader of the published set would reasonably take for data.
+
+Export now re-runs the rule engine on every item before and after anonymising and stops if any answer differs.
+
 The lesson is the one this document keeps arriving at. A safeguard tested only against the cases its author imagined is tested against its author's imagination. The export is reviewed, every time, before it is committed.
 
 A test checks that anonymising a session never changes what the rule engine concludes about it. An anonymiser that did would alter the evaluation without anyone noticing, which is the failure this whole document is about.

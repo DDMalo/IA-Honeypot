@@ -49,6 +49,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session as DbSession
 from sqlalchemy.orm import selectinload
 
+from honeypot_ai.classify import rules
 from honeypot_ai.classify.facts import SessionFacts, facts_from_row
 from honeypot_ai.classify.taxonomy import Intent
 from honeypot_ai.db import SessionRow
@@ -209,15 +210,33 @@ def build_sample(
     # One anonymiser for the whole export, fed in sample order, so the same
     # server gets the same placeholder everywhere and the export is stable.
     anonymiser = Anonymiser()
-    items = [
-        SampleItem(
-            sample_id=candidate.fingerprint[:12],
-            session_id=candidate.representative,
-            stratum=candidate.stratum,
-            weight=candidate.sessions,
-            drawn_by=drawn_by,
-            facts=anonymiser.facts(facts_from_row(rows[candidate.representative])),
+    items = []
+    for candidate, drawn_by in picked:
+        raw = facts_from_row(rows[candidate.representative])
+        safe = anonymiser.facts(raw)
+        _check_rules_unchanged(candidate.fingerprint[:12], raw, safe)
+        items.append(
+            SampleItem(
+                sample_id=candidate.fingerprint[:12],
+                session_id=candidate.representative,
+                stratum=candidate.stratum,
+                weight=candidate.sessions,
+                drawn_by=drawn_by,
+                facts=safe,
+            )
         )
-        for candidate, drawn_by in picked
-    ]
     return items, candidates
+
+
+def _check_rules_unchanged(sample_id: str, raw: SessionFacts, safe: SessionFacts) -> None:
+    """Refuse to export an item the anonymiser has changed in meaning.
+
+    The unit tests check this on invented sessions; this checks it on the real
+    ones, every time, because the real ones are what the evaluation is made of.
+    """
+    before, after = rules.classify(raw), rules.classify(safe)
+    if after.intent is not before.intent or after.behaviours != before.behaviours:
+        raise ValueError(
+            f"anonymising item {sample_id} changed what the rules conclude "
+            f"({before.intent} -> {after.intent}); refusing to export"
+        )

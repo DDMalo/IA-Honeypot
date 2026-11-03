@@ -13,8 +13,9 @@ from datetime import UTC, datetime
 
 import pytest
 
+from honeypot_ai.classify.facts import SessionFacts
 from honeypot_ai.classify.taxonomy import TAXONOMY_VERSION, Intent
-from honeypot_ai.label.sample import Candidate, DrawnBy, choose
+from honeypot_ai.label.sample import Candidate, DrawnBy, _check_rules_unchanged, choose
 
 
 def pool() -> list[Candidate]:
@@ -169,3 +170,13 @@ def db():  # type: ignore[no-untyped-def]
         for table in reversed(Base.metadata.sorted_tables):
             session.execute(table.delete())
         session.commit()
+
+
+def test_an_item_the_anonymiser_changed_in_meaning_is_refused() -> None:
+    """If anonymising ever altered what the rules conclude, exporting it would
+    quietly change the evaluation. The export stops instead."""
+    raw = SessionFacts(session_id="s", commands=("uname -a", "nproc"), download_urls=())
+    wrecked = SessionFacts(session_id="s", commands=("cd /tmp", "wget x", "sh x"), download_urls=())
+    with pytest.raises(ValueError, match="refusing to export"):
+        _check_rules_unchanged("abc", raw, wrecked)
+    _check_rules_unchanged("abc", raw, raw)

