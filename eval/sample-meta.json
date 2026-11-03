@@ -1,0 +1,36 @@
+{
+  "created": "2026-11-03T18:38:23.285230+00:00",
+  "seed": 1,
+  "per_class": 20,
+  "uniform": 60,
+  "taxonomy_version": 1,
+  "items": 140,
+  "population": {
+    "sessions": 156739,
+    "sequences": 950,
+    "sequences_by_stratum": {
+      "credential_access": 3,
+      "fingerprinting": 32,
+      "other": 30,
+      "persistence": 61,
+      "protocol_probe": 27,
+      "resource_profiling": 16,
+      "shell_probing": 80,
+      "staging": 701
+    },
+    "sessions_by_stratum": {
+      "credential_access": 22140,
+      "fingerprinting": 114614,
+      "other": 41,
+      "persistence": 1549,
+      "protocol_probe": 79,
+      "resource_profiling": 301,
+      "shell_probing": 12123,
+      "staging": 5892
+    }
+  },
+  "drawn_by": {
+    "uniform": 60,
+    "stratum": 80
+  }
+}
