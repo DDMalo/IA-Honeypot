@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **An evaluation script**, `python -m honeypot_ai.evaluate`. `predict` runs a classifier over the anonymised sample and keeps every answer in `eval/predictions/`, resumable and committed, so a paid run is re-scored without a key; `report` scores predictions against the adjudicated labels. It reports accuracy and macro-F1 by distinct sequence and by session, the uniform and stratified parts apart (recall from the uniform part, which no label chose), a majority-class baseline beside every figure, per-class precision and recall, a confusion matrix, latency and an estimated cost, and the agreement between labellers. Failures count as wrong. Run on the rules, the anonymised facts reproduce the rules' strata on all 140 items.
 - **`review --intent-only`** asks only for the intent and records behaviours as not labelled (`null`), which the evaluation must not read as "none". Intent is one choice in eight and the primary metric; behaviours are any of thirty and most of a labelling sitting. The first labelling round uses it, and behaviours are evaluated later or not at all.
 - Two rule gaps found after the rules were frozen are written into `docs/evaluation-set.md` as predictions, before any label exists: base64-heredoc delivery is read as `resource_profiling`, and `scp` is not recognised as a download. A gap announced before the measurement is a result; one patched after it is a number nobody can trust.
 
