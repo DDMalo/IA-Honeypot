@@ -23,6 +23,7 @@ from honeypot_ai.evaluate.metrics import (
     confusion,
     macro_f1,
     majority_baseline,
+    mcnemar,
     per_class,
     percentile,
 )
@@ -306,3 +307,24 @@ def test_the_command_line_scores_the_rules_end_to_end(tmp_path: Path) -> None:
         == 0
     )
     assert "| rules | 1 | 0 | 1.00 |" in out.read_text(encoding="utf-8")
+
+
+def test_mcnemar_by_hand() -> None:
+    # 5 discordant items, 1 vs 4: p = 2·(C(5,0)+C(5,1))/2^5 = 12/32.
+    first = [True, False, False, False, False, True]
+    second = [False, True, True, True, True, True]
+    b, c, p = mcnemar(first, second)
+    assert (b, c) == (1, 4)
+    assert p == pytest.approx(0.375)
+    assert mcnemar([True], [True]) == (0, 0, 1.0)
+
+
+def test_the_report_compares_classifiers_pairwise_on_the_same_items() -> None:
+    items = [item("a"), item("b"), item("c")]
+    labels = [label(s, STAGING) for s in "abc"]
+    runs = {
+        "x": {s: prediction(s, STAGING) for s in "abc"},
+        # y never answered c: the comparison must use a and b only.
+        "y": {"a": prediction("a", PROBE), "b": prediction("b", STAGING)},
+    }
+    assert "| x | y | 1 | 0 | 1.0000 |" in build_report(items, labels, runs)

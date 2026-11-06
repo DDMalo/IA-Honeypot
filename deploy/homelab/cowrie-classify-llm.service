@@ -1,0 +1,29 @@
+# Labels new command sequences with Gemini. Triggered by cowrie-classify-llm.timer.
+#
+# The rules still label every session as it arrives (cowrie-classify.timer).
+# This adds a second label from the model, which the v0.5.0 evaluation found
+# more accurate: 0.85 against 0.74 on 140 hand-labelled sequences, and it is
+# the one that recognises a binary delivered through a base64 heredoc.
+#
+# It is scheduled because it cannot quietly spend a quota:
+#   --by-sequence  asks once per distinct command sequence and copies the
+#                  answer to every session sharing it. A month of 156,739
+#                  sessions held 950 distinct sequences.
+#   --limit 200    caps the model calls per run, not the sessions. Whatever is
+#                  left is picked up by the next run, newest first.
+# A sequence the model declines to answer is not stored, so it is retried
+# tomorrow rather than marked done with a refusal.
+
+[Unit]
+Description=Label new honeypot command sequences with Gemini
+Documentation=https://github.com/DDMalo/IA-Honeypot
+After=docker.service cowrie-classify.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=david
+WorkingDirectory=/home/david/IA-Honeypot
+EnvironmentFile=/home/david/IA-Honeypot/.env
+ExecStart=/home/david/IA-Honeypot/.venv/bin/python -m honeypot_ai.classify --classifier gemini --by-sequence --limit 200
+TimeoutStartSec=3600

@@ -3,14 +3,11 @@
 # Only the rules run on a timer. They are deterministic, cost nothing and take
 # milliseconds per session, so labelling everything as it arrives is free.
 #
-# The language-model classifiers are deliberately NOT scheduled. Gemini is
-# metered and Ollama takes twenty seconds a session on this hardware, so both
-# are run by hand over a bounded number of sessions:
-#
-#   python -m honeypot_ai.classify --classifier gemini --limit 200
-#
-# A timer that quietly spends a quota is a worse failure than a timer that
-# does not exist.
+# Gemini runs on its own timer, once per distinct command sequence and with a
+# cap on calls (cowrie-classify-llm.service), because a timer that quietly
+# spends a quota is a worse failure than a timer that does not exist. Ollama is
+# not scheduled: the 1.5B model scored below the majority-class baseline in the
+# v0.5.0 evaluation and takes seconds a session on this hardware.
 
 [Unit]
 Description=Label honeypot sessions with the rule classifier

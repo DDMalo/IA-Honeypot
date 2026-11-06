@@ -124,6 +124,25 @@ def cohen_kappa(first: Sequence[Intent], second: Sequence[Intent]) -> float:
     return (observed - expected) / (1 - expected)
 
 
+def mcnemar(first_right: Sequence[bool], second_right: Sequence[bool]) -> tuple[int, int, float]:
+    """Exact two-sided McNemar test on paired right/wrong answers.
+
+    Only the items the two classifiers disagree on carry information: `b` the
+    first got right and the second wrong, `c` the reverse. Returns `(b, c, p)`.
+    Exact rather than the chi-squared approximation, because with 140 items the
+    discordant count can be small enough for the approximation to mislead.
+    """
+    if len(first_right) != len(second_right):
+        raise ValueError("both classifiers must answer the same items")
+    b = sum(x and not y for x, y in zip(first_right, second_right, strict=True))
+    c = sum(y and not x for x, y in zip(first_right, second_right, strict=True))
+    n = b + c
+    if n == 0:
+        return b, c, 1.0
+    tail = sum(math.comb(n, i) for i in range(min(b, c) + 1)) / 2**n
+    return b, c, min(1.0, 2 * tail)
+
+
 def percentile(values: Sequence[float], q: float) -> float:
     """Nearest-rank percentile, `q` between 0 and 100."""
     if not values:

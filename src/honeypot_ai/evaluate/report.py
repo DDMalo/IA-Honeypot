@@ -41,6 +41,7 @@ from honeypot_ai.evaluate.metrics import (
     confusion,
     macro_f1,
     majority_baseline,
+    mcnemar,
     per_class,
     percentile,
 )
@@ -153,6 +154,39 @@ def summary_rows(
             f"{_fmt(accuracy(pairs, weighted=True))} |"
         )
     return header + rows
+
+
+def paired_comparison(
+    items: Sequence[SampleItem],
+    truth: dict[str, HumanLabel],
+    runs: dict[str, dict[str, Prediction]],
+) -> list[str]:
+    """Whether a difference in accuracy is more than the luck of 140 items.
+
+    Only items every classifier answered are compared, so each pair is scored
+    on exactly the same sessions.
+    """
+    names = list(runs)
+    if len(names) < 2:
+        return []
+    shared = [
+        it.sample_id
+        for it in items
+        if it.sample_id in truth and all(it.sample_id in runs[name] for name in names)
+    ]
+    out = [
+        "Paired comparison (exact McNemar test on the items both answered):",
+        "",
+        "| First | Second | Only first right | Only second right | p |",
+        "| --- | --- | ---: | ---: | ---: |",
+    ]
+    for i, first in enumerate(names):
+        for second in names[i + 1 :]:
+            right_a = [runs[first][s].intent is truth[s].intent for s in shared]
+            right_b = [runs[second][s].intent is truth[s].intent for s in shared]
+            b, c, p = mcnemar(right_a, right_b)
+            out.append(f"| {first} | {second} | {b} | {c} | {p:.4f} |")
+    return [*out, ""]
 
 
 def classifier_section(
@@ -288,6 +322,7 @@ def build_report(
         out += ["", "Agreement between labellers:", *agreement]
 
     out += ["", "## Summary", "", *summary_rows(items, truth, runs), ""]
+    out += paired_comparison(items, truth, runs)
     for name, predicted in runs.items():
         out += classifier_section(name, items, truth, predicted, pricing)
     return "\n".join(out).rstrip() + "\n"
