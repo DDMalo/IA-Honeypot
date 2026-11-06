@@ -1,0 +1,17 @@
+# Once a day. New sequences arrive slowly, the quota is daily, and nothing that
+# reads these labels needs them sooner than tomorrow.
+#
+# Early morning, after the night's scanning has been ingested and labelled by
+# the rules, and away from the reputation check at 06:40 so the two do not
+# compete for the network on a small machine.
+
+[Unit]
+Description=Label new honeypot command sequences with Gemini daily
+
+[Timer]
+OnCalendar=*-*-* 05:20:00
+RandomizedDelaySec=600s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

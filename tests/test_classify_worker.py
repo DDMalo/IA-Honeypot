@@ -13,17 +13,19 @@ import os
 from datetime import UTC, date, datetime, timedelta
 
 import pytest
+from sqlalchemy.orm import Session
 
 from honeypot_ai.classify.facts import SessionFacts
 from honeypot_ai.classify.taxonomy import TAXONOMY_VERSION, Behaviour, Intent, Label, Operator
 from honeypot_ai.classify.worker import (
     ClassifyStats,
     DailyShare,
+    classify_by_sequence,
     classify_sessions,
     daily_unmatched,
     pending_sessions,
 )
-from honeypot_ai.db import SessionLabelRow, SessionRow
+from honeypot_ai.db import CommandRow, SessionLabelRow, SessionRow
 
 TEST_DB = os.getenv("TEST_DATABASE_URL")
 needs_db = pytest.mark.skipif(TEST_DB is None, reason="TEST_DATABASE_URL is not set")
@@ -249,6 +251,158 @@ def test_deleting_a_session_takes_its_labels_with_it(db) -> None:  # type: ignor
     db.commit()
 
     assert db.get(SessionLabelRow, ("s1", "rules")) is None
+
+
+# --- One answer per distinct sequence --------------------------------------
+
+
+class Counting:
+    """A classifier that records what it was asked."""
+
+    def __init__(self, label: Label | None = None) -> None:
+        self.asked: list[tuple[str, ...]] = []
+        self.label = label
+
+    def __call__(self, facts: SessionFacts) -> Label:
+        self.asked.append(facts.commands)
+        if self.label is not None:
+            return Label(
+                session_id=facts.session_id,
+                intent=self.label.intent,
+                confidence=self.label.confidence,
+                notes=self.label.notes,
+            )
+        return label_for(facts)
+
+
+def add_session(
+    db: Session,
+    session_id: str,
+    *commands: str,
+    authenticated: bool = True,
+    minutes_ago: int = 0,
+) -> None:
+    row = a_session(session_id, minutes_ago)
+    row.authenticated = authenticated
+    db.add(row)
+    db.flush()
+    for seq, command in enumerate(commands):
+        db.add(
+            CommandRow(
+                session_id=session_id,
+                seq=seq,
+                input=command,
+                failed=False,
+                occurred_at=row.started_at,
+            )
+        )
+    db.commit()
+
+
+def labelled(db, classifier: str = "gemini") -> dict[str, str]:  # type: ignore[no-untyped-def]
+    rows = db.query(SessionLabelRow).filter_by(classifier=classifier).all()
+    return {row.session_id: row.intent for row in rows}
+
+
+@needs_db
+def test_sessions_sharing_a_sequence_cost_one_call(db) -> None:  # type: ignore[no-untyped-def]
+    for i in range(3):
+        add_session(db, f"s{i}", "uname -a", "nproc")
+    add_session(db, "other", "cat /proc/cpuinfo")
+    model = Counting()
+
+    stats = classify_by_sequence(db, model, "gemini")
+
+    assert len(model.asked) == 2
+    assert stats.sessions_labelled == 4
+    assert set(labelled(db)) == {"s0", "s1", "s2", "other"}
+
+
+@needs_db
+def test_a_sequence_answered_before_is_not_asked_again(db) -> None:  # type: ignore[no-untyped-def]
+    add_session(db, "old", "uname -a")
+    classify_by_sequence(db, Counting(), "gemini")
+    add_session(db, "new", "uname -a")
+    model = Counting()
+
+    stats = classify_by_sequence(db, model, "gemini")
+
+    assert model.asked == []
+    assert stats.reused == 1
+    assert labelled(db)["new"] == "staging"
+
+
+@needs_db
+def test_the_login_outcome_is_part_of_the_sequence(db) -> None:  # type: ignore[no-untyped-def]
+    """The classifier sees whether the login succeeded, so it is a different input."""
+    add_session(db, "in", authenticated=True)
+    add_session(db, "out", authenticated=False)
+    model = Counting()
+    classify_by_sequence(db, model, "gemini")
+    assert len(model.asked) == 2
+
+
+@needs_db
+def test_the_limit_counts_calls_and_the_rest_waits_for_the_next_run(db) -> None:  # type: ignore[no-untyped-def]
+    for i in range(3):
+        add_session(db, f"s{i}", f"echo {i}", minutes_ago=i)
+    model = Counting()
+
+    first = classify_by_sequence(db, model, "gemini", max_calls=2)
+    assert len(model.asked) == 2
+    assert first.left_for_later == 1
+    assert set(labelled(db)) == {"s0", "s1"}  # newest first
+
+    classify_by_sequence(db, model, "gemini", max_calls=2)
+    assert set(labelled(db)) == {"s0", "s1", "s2"}
+
+
+@needs_db
+def test_a_refusal_is_not_stored_so_it_is_asked_again(db) -> None:  # type: ignore[no-untyped-def]
+    add_session(db, "s1", "weird")
+    gave_up = Counting(
+        Label(session_id="x", intent=Intent.OTHER, confidence=0.0, notes="unclassified: timeout")
+    )
+
+    stats = classify_by_sequence(db, gave_up, "gemini")
+    assert stats.unclassified == 1
+    assert labelled(db) == {}
+
+    classify_by_sequence(db, Counting(), "gemini")
+    assert labelled(db) == {"s1": "staging"}
+
+
+@needs_db
+def test_another_classifiers_answer_is_not_reused(db) -> None:  # type: ignore[no-untyped-def]
+    add_session(db, "s1", "uname -a")
+    classify_by_sequence(db, Counting(), "rules")
+    model = Counting()
+    classify_by_sequence(db, model, "gemini")
+    assert len(model.asked) == 1
+
+
+@needs_db
+def test_an_answer_under_an_older_taxonomy_is_not_reused(db) -> None:  # type: ignore[no-untyped-def]
+    add_session(db, "old", "uname -a")
+    db.add(
+        SessionLabelRow(
+            session_id="old",
+            classifier="gemini",
+            intent="staging",
+            behaviours=[],
+            operator="unknown",
+            taxonomy_version=TAXONOMY_VERSION - 1,
+        )
+    )
+    db.commit()
+    add_session(db, "new", "uname -a")
+    model = Counting()
+
+    classify_by_sequence(db, model, "gemini")
+
+    assert len(model.asked) == 1
+    rows = db.query(SessionLabelRow).filter_by(classifier="gemini").all()
+    assert {row.taxonomy_version for row in rows} == {TAXONOMY_VERSION}
 
 
 @pytest.fixture
