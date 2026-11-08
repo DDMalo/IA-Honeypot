@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A freshness check with phone notifications**, `python -m honeypot_ai.health --notify`, run hourly by `cowrie-health.timer`. Three checks, each on the age of the data a stage writes rather than on whether a process exited cleanly: the newest session is under six hours old, every session ingested over two hours ago has a rule label, and a language-model label was written in the last thirty-six hours. Messages go to an [ntfy](https://ntfy.sh) topic kept in `.env`, carry counts and times only, and are sent once when a check fails and once when it recovers, never hourly. Written after the rule engine's timer went ten days uninstalled and then a query stalled it again, both without a single error: a stage that does not run has nothing to log.
+
 ## [0.5.0] - 2026-11-07
 
 The evaluation release. The three classifiers were scored against 140 hand-labelled command sequences instead of against each other, and the result decided what runs in production: Gemini 3.5 Flash-Lite (accuracy 0.85, macro-F1 0.78) beat the rule engine (0.74, 0.69), and the local Qwen 2.5 1.5B scored below a classifier that always answers the commonest class. Getting there meant publishing attacker sessions safely, and the first two attempts to do that would have published two private keys and a malware binary; both were caught by reviewing the real export before it was committed. How the set was built and what weakens it is in `docs/evaluation-set.md`; the results and their caveats are in `docs/model-comparison.md`.
