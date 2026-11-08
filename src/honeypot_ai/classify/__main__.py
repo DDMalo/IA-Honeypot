@@ -42,7 +42,7 @@ from honeypot_ai.classify.worker import (
     OTHER_SHARE_THRESHOLD,
     Classifier,
     classify_by_sequence,
-    classify_sessions,
+    classify_pending,
     daily_unmatched,
     pending_sessions,
 )
@@ -202,13 +202,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     with session_factory()() as db:
-        rows = pending_sessions(db, name, args.limit, reclassify=args.reclassify)
-        print(f"{name}, taxonomy v{TAXONOMY_VERSION}: {len(rows)} session(s) to label")
-
         if args.dry_run:
+            rows = pending_sessions(db, name, args.limit, reclassify=args.reclassify)
+            print(f"{name}, taxonomy v{TAXONOMY_VERSION}: {len(rows)} session(s) to label")
             return _rehearse(classifier, rows)
 
-        stats = classify_sessions(db, classifier, name, rows, args.batch_size)
+        print(f"{name}, taxonomy v{TAXONOMY_VERSION}")
+        stats = classify_pending(
+            db, classifier, name, args.limit, args.batch_size, reclassify=args.reclassify
+        )
 
     print(stats)
     return 0
