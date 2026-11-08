@@ -139,10 +139,41 @@ def test_the_report_states_the_week_and_the_change() -> None:
 
 def test_techniques_new_this_week_are_marked() -> None:
     page = render(sample())
-    assert re.search(
-        r"\[T1105\]\(https://attack\.mitre\.org/techniques/T1105\).*\| 40 \| \*\*new\*\*", page
+    assert "| [T1105](https://attack.mitre.org/techniques/T1105) Ingress Tool Transfer " in page
+    assert re.search(r"T1105\).*\| Command and Control \| 40 \| \*\*new\*\* \|", page)
+    assert re.search(r"T1082\) System Information Discovery \| Discovery \| 9 \|  \|", page)
+
+
+def test_a_technique_in_several_tactics_is_listed_once() -> None:
+    """T1053.003 (Cron) is execution, persistence and privilege escalation."""
+    cron: Counter[tuple[str, ...]] = Counter({("cron_install",): 22})
+    data = WeeklyData(week=W45, behaviour_sets=cron)
+    page = render(data)
+    assert page.count("[T1053.003]") == 1
+    assert "| Execution, Persistence, Privilege Escalation | 22 |" in page
+
+
+def test_techniques_follow_the_matrix_then_the_count() -> None:
+    sets: Counter[tuple[str, ...]] = Counter(
+        {
+            ("payload_download",): 100,  # command and control, last column
+            ("authorized_keys_write",): 50,  # persistence
+            ("cron_install",): 5,  # execution comes first
+            ("host_enumeration",): 9,  # discovery
+            ("user_enumeration",): 30,  # discovery, more sessions
+        }
     )
-    assert re.search(r"\[T1082\]\(.*\) System Information Discovery \| 9 \|  \|", page)
+    page = render(WeeklyData(week=W45, behaviour_sets=sets))
+    rows = re.findall(r"^\| \[(T[\d.]+)\]", page, re.MULTILINE)
+    assert rows[:2] == ["T1053.003", "T1098.004"]
+    assert rows[-1] == "T1105"
+    assert rows.index("T1082") > rows.index("T1098.004")
+    assert rows.index("T1087.001") < rows.index("T1082")  # 30 before 9 within discovery
+
+
+def test_a_change_that_rounds_to_nothing_has_no_sign() -> None:
+    data = WeeklyData(week=W45, sessions=10_001, sessions_before=10_000)
+    assert "| Sessions | 10,001 | 0% |" in render(data)
 
 
 def test_campaigns_are_described_by_what_they_did() -> None:

@@ -37,8 +37,9 @@ flowchart LR
 | PostgreSQL | Homelab | Sessions, commands, credentials, enrichment, classifications |
 | Enrichment | Homelab | Geolocation, ASN and IP reputation |
 | Classification | Homelab | Rule-based and LLM classifiers, compared against a labelled set |
-| ATT&CK mapping | Homelab | Maps sessions to MITRE ATT&CK techniques |
-| Reporting | Homelab | Grafana dashboards and automated weekly reports |
+| ATT&CK mapping | Homelab | Maps behaviours to MITRE ATT&CK techniques through a hand-written table, checked against a pinned copy of the official catalogue ([`attack.md`](attack.md)) |
+| Reporting | Homelab | Grafana dashboards, and a weekly Markdown report of aggregates ([`weekly-report.md`](weekly-report.md)) |
+| Freshness checks | Homelab | Hourly checks that each stage is still writing data, with phone notifications through ntfy when that changes |
 
 ## Data flow
 
