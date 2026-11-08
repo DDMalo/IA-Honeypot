@@ -1,9 +1,9 @@
 # Checks that every stage is still producing fresh data, and tells ntfy when
 # that changes. Triggered by cowrie-health.timer.
 #
-# Two stages failed silently for ten days in this deployment — a timer that was
-# never installed and a query that never finished — and neither logged an
-# error, because a stage that does not run has nothing to log. This judges each
+# The rule engine stopped twice in this deployment without a word — for ten
+# days its timer was never installed, and later a query never finished — and
+# neither logged an error, because a stage that does not run has nothing to log. This judges each
 # stage by the age of what it writes instead.
 #
 # Needs NTFY_TOPIC in .env. Exits 1 while any check fails, so the unit also

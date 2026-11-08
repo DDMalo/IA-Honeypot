@@ -307,7 +307,9 @@ def _count(n: int) -> str:
 def _change(now: int, before: int) -> str:
     if before == 0:
         return "new" if now else "—"
-    return f"{(now - before) / before:+.0%}"
+    change = (now - before) / before
+    # A change that rounds to nothing is "0%", not "-0%" or "+0%".
+    return "0%" if round(change * 100) == 0 else f"{change:+.0%}"
 
 
 def technique_counts(
@@ -367,27 +369,30 @@ def render(data: WeeklyData, catalogue: Catalogue | None = None) -> str:
         "",
         f"## ATT&CK techniques (Enterprise {catalogue.version})",
         "",
-        "Derived from observed behaviours. **New** means not seen the week before.",
+        "Derived from observed behaviours, in matrix order. A technique that belongs to "
+        "several tactics is listed once, placed by the first. **New** means not seen the week "
+        "before.",
         "",
     ]
     if not now:
         out += ["No technique was evidenced this week.", ""]
-    for tactic in catalogue.tactics:
-        rows = sorted(
-            (
-                (n, tid)
-                for tid, n in now.items()
-                if tactic.shortname in catalogue.techniques[tid].tactics
-            ),
-            key=lambda r: (-r[0], r[1]),
-        )
-        if not rows:
-            continue
-        out += [f"**{tactic.name}**", "", "| Technique | Sessions | |", "|---|---:|---|"]
-        for n, tid in rows:
+    else:
+        order = {tactic.shortname: i for i, tactic in enumerate(catalogue.tactics)}
+        names = {tactic.shortname: tactic.name for tactic in catalogue.tactics}
+
+        def first_tactic(tid: str) -> int:
+            return min((order[t] for t in catalogue.techniques[tid].tactics), default=len(order))
+
+        out += ["| Technique | Tactics | Sessions | |", "|---|---|---:|---|"]
+        for tid in sorted(now, key=lambda t: (first_tactic(t), -now[t], t)):
             technique = catalogue.techniques[tid]
+            tactics = ", ".join(
+                names[t] for t in sorted(technique.tactics, key=lambda t: order.get(t, 99))
+            )
             flag = "**new**" if tid not in before else ""
-            out.append(f"| [{tid}]({technique.url}) {technique.name} | {n:,} | {flag} |")
+            out.append(
+                f"| [{tid}]({technique.url}) {technique.name} | {tactics} | {now[tid]:,} | {flag} |"
+            )
         out.append("")
 
     out += ["## The largest campaigns", ""]

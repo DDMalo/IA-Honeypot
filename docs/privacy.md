@@ -68,7 +68,9 @@ Everything in this repository is public, so the line is drawn strictly.
 
 **Published:** aggregates, and the sample fixtures used by the tests, which use the addresses reserved for documentation by RFC 5737 (`203.0.113.0/24`, `198.51.100.0/24`). No real attacker address appears anywhere in the repository.
 
-Weekly reports and dashboards follow the same rule: counts, countries, networks and credential frequencies — never a list of addresses.
+Weekly reports and dashboards follow the same rule: counts, countries, networks and credential frequencies — never a list of addresses. The weekly report also leaves out commands: a campaign is described by its intent and ATT&CK techniques, because some command logs carry a payload typed into the shell. Captured files appear only as SHA-256 hashes. Usernames and passwords are the only attacker-chosen text in a report, and they are cut short and quoted so they cannot become links or markup. Reports are written on the homelab and published by hand, after a person has read them. Details are in [`weekly-report.md`](weekly-report.md).
+
+Phone notifications, from the freshness checks and the weekly report, go through a public ntfy server and carry counts, times and technique names, never an address or a command.
 
 ## Access
 
