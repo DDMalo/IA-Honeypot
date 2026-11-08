@@ -74,6 +74,7 @@ def send(
     topic: str,
     server: str = DEFAULT_SERVER,
     client: httpx.Client | None = None,
+    tags: str = "warning",
 ) -> None:
     """POST one message to ntfy. Raises on failure, so the caller can decide."""
     owned = client is None
@@ -82,7 +83,7 @@ def send(
         response = http.post(
             f"{server.rstrip('/')}/{topic}",
             content=body.encode("utf-8"),
-            headers={"Title": title, "Priority": priority, "Tags": "warning"},
+            headers={"Title": title, "Priority": priority, "Tags": tags},
         )
         response.raise_for_status()
     finally:
