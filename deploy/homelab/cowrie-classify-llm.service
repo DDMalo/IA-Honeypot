@@ -7,8 +7,8 @@
 #
 # It is scheduled because it cannot quietly spend a quota:
 #   --by-sequence  asks once per distinct command sequence and copies the
-#                  answer to every session sharing it. A month of 156,739
-#                  sessions held 950 distinct sequences.
+#                  answer to every session sharing it. New distinct
+#                  sequences arrive at about a hundred a day.
 #   --limit 200    caps the model calls per run, not the sessions. Whatever is
 #                  left is picked up by the next run, newest first.
 # A sequence the model declines to answer is not stored, so it is retried

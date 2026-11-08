@@ -26,7 +26,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from sqlalchemy import func, select, text
+from sqlalchemy import Select, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session as DbSession
 from sqlalchemy.orm import selectinload
@@ -85,24 +85,45 @@ def pending_sessions(
     `reclassify` ignores existing labels entirely, for when the prompt or the
     rules changed rather than the vocabulary.
     """
-    existing = select(SessionLabelRow.session_id).where(
-        SessionLabelRow.classifier == classifier,
-        SessionLabelRow.taxonomy_version == TAXONOMY_VERSION,
-    )
+    return list(db.execute(pending_statement(classifier, limit, reclassify=reclassify)).scalars())
 
+
+def pending_statement(
+    classifier: str, limit: int | None = None, *, reclassify: bool = False
+) -> Select[SessionRow]:
+    """The query behind `pending_sessions`, separate so its shape can be tested.
+
+    **`NOT EXISTS`, never `NOT IN`.** The two mean the same here, and with a
+    few thousand labels they run the same. They part company when the label
+    set outgrows `work_mem`: PostgreSQL can then no longer hash the `NOT IN`
+    list and falls back to scanning every label for every session. On the
+    homelab that happened at 228,944 sessions and as many labels — a run that
+    had taken ninety seconds was still in its first query after twenty
+    minutes, with the timer waiting behind it. `NOT EXISTS` is planned as a
+    hash anti-join, which spills to disk instead of degrading, and answers the
+    same question in a tenth of a second at that size.
+    """
     statement = select(SessionRow).options(
         selectinload(SessionRow.commands),
         selectinload(SessionRow.login_attempts),
         selectinload(SessionRow.file_transfers),
     )
     if not reclassify:
-        statement = statement.where(SessionRow.session_id.not_in(existing))
+        labelled = (
+            select(SessionLabelRow.session_id)
+            .where(
+                SessionLabelRow.session_id == SessionRow.session_id,
+                SessionLabelRow.classifier == classifier,
+                SessionLabelRow.taxonomy_version == TAXONOMY_VERSION,
+            )
+            .exists()
+        )
+        statement = statement.where(~labelled)
 
     statement = statement.order_by(SessionRow.started_at.desc())
     if limit is not None:
         statement = statement.limit(limit)
-
-    return list(db.execute(statement).scalars().all())
+    return statement
 
 
 def classify_sessions(

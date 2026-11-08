@@ -24,6 +24,7 @@ from honeypot_ai.classify.worker import (
     classify_sessions,
     daily_unmatched,
     pending_sessions,
+    pending_statement,
 )
 from honeypot_ai.db import CommandRow, SessionLabelRow, SessionRow
 
@@ -251,6 +252,14 @@ def test_deleting_a_session_takes_its_labels_with_it(db) -> None:  # type: ignor
     db.commit()
 
     assert db.get(SessionLabelRow, ("s1", "rules")) is None
+
+
+def test_pending_sessions_are_found_with_an_anti_join_not_a_list() -> None:
+    """`NOT IN (all labels)` stopped being hashable at 228,944 labels and turned
+    a ninety-second run into one that never finished. See `pending_statement`."""
+    sql = str(pending_statement("rules"))
+    assert "NOT (EXISTS" in sql
+    assert "NOT IN" not in sql
 
 
 # --- One answer per distinct sequence --------------------------------------

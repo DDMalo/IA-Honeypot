@@ -57,6 +57,8 @@ The rules were frozen when the sample was drawn, so gaps found after that are re
 - **Delivery through a base64 heredoc is not recognised.** A session that writes a binary with `base64 -d > file <<.` and is cut off before running it is filed by the rules as `resource_profiling`. Writing a payload to disk is `staging`. Expected: the rules are wrong on every such item.
 - **`scp` is not recognised as a download.** The sessions in this sample that use it still reach `staging` through their other commands, so the gap is expected to show in behaviours rather than in intent.
 
+**Outcome.** The first prediction was confirmed exactly: the rules filed all three heredoc sessions as `resource_profiling`, and the reference labels say `staging`. The second was confirmed for intent — the rules got both `scp` sessions right — and could not be tested for behaviours, because behaviours were not labelled in this round (below).
+
 ## Safe to commit
 
 The set lives in `eval/` and is committed, because an evaluation nobody else can rerun is a claim rather than a result. Committing it means publishing attacker sessions, so export goes through an anonymiser that cannot be skipped:
@@ -83,6 +85,12 @@ The fix was reviewed the same way, and the review was not clean either:
 
 Export now re-runs the rule engine on every item before and after anonymising and stops if any answer differs.
 
+### The sample that was labelled
+
+The fixes meant drawing the sample again, with the same seed and the same frozen rules. It came back with 140 items rather than 143. Between the two draws the population had grown by one distinct sequence, 949 to 950, and a seeded draw is reproducible only over the same population: the uniform part is chosen by giving every sequence a random key in a fixed order, so one more sequence shifts every key after it. A different uniform part overlaps the strata differently, and the stratified part adds only what each class still lacks, so the total moves. Nothing was lost; the population a sample describes is recorded beside it in `eval/sample-meta.json` for exactly this reason.
+
+The 140 items stand for 155,001 of the 156,739 sessions in that population. One of them alone stands for 103,209.
+
 The lesson is the one this document keeps arriving at. A safeguard tested only against the cases its author imagined is tested against its author's imagination. The export is reviewed, every time, before it is committed.
 
 A test checks that anonymising a session never changes what the rule engine concludes about it. An anonymiser that did would alter the evaluation without anyone noticing, which is the failure this whole document is about.
@@ -96,8 +104,11 @@ Kept deliberately: hostnames in URLs, which are attacker infrastructure; file ha
 python -m honeypot_ai.label sample --per-class 20 --uniform 60 --seed 1
 
 # Anywhere with a copy of the repository — no database needed
-python -m honeypot_ai.label review --labeller david
+python -m honeypot_ai.label review --labeller david --intent-only
 python -m honeypot_ai.label status
+
+# Score the classifiers — also no database needed
+python -m honeypot_ai.evaluate report eval/predictions/*.jsonl
 ```
 
 `sample` refuses to overwrite an existing sample without `--force`: redrawing it would orphan every label written against it. Labels are append-only — changing your mind adds a line, the latest line per labeller wins, and the history of second thoughts is kept, because a session two careful readings disagreed about is worth knowing about.
@@ -119,3 +130,19 @@ The precedence rule decides most cases; these are the ones it does not settle on
 **`other` is for genuinely nothing.** Not for "unsure between two" — pick the furthest of the two — but for sessions no category describes. If `other` starts to fill up, that is the taxonomy asking to change, which is the reason it exists.
 
 **Notes for anything you hesitated over.** A label you would defend in an argument and a label you picked at random look identical in a file. The note is how the difference survives.
+
+## How the set was actually labelled
+
+Everything above is the method. This is what happened when it was applied, including the parts that weaken it, because a reader deciding how far to trust the numbers needs those more than anything else.
+
+**Intent only.** The labelling tool asks for intent, behaviours and operator. Intent is one choice among eight and the metric the evaluation is built on; behaviours are any of thirty, and they were most of the time a sitting took. The first round labelled intent only (`--intent-only`), and the tool records behaviours as *not labelled* rather than as *none*, so that an evaluation cannot mistake one for the other and count every behaviour a classifier finds as a false positive. Behaviours are not evaluated in v0.5.0.
+
+**The first labeller is not a security specialist.** All 140 items were labelled blind by the project's author, with a one-page glossary of what common commands do — `uname`, `/proc/cpuinfo`, `chmod +x`, `authorized_keys`, `busybox` — written before labelling began and referring to no item in the sample. The glossary explains commands; it does not say what any session is.
+
+**A second labeller, which is a language model.** Claude labelled the same 140 items without reading the first labeller's answers. It is not a fully independent second opinion, for two reasons recorded here rather than left out. It had seen the rules' strata while reviewing the sample for the anonymiser, so it was not blind to the rules. And while the first labeller worked, it answered questions about what commands do, and on five items it gave the intent outright — `4bdb8dc0df42`, `a22940d51f55`, `de93501df612`, `3a8128e90925` and `07e0b22a5eb2`. On those five the two labels are not independent; they agree, as they would.
+
+**Agreement: 105 of 140 (75%), Cohen's kappa 0.70.** Most of the disagreement was one systematic difference: eleven sequences that download or upload a program and run it were labelled `persistence` by the first labeller and `staging` by the second. Persistence is installing a way back in — a key, a cron job, an account — and none of the eleven does that. Three more were slips that contradicted the first labeller's own answers on identical sequences, five were settled by the definitions, and sixteen were genuinely arguable.
+
+**Adjudication.** The first labeller reviewed all 35 disagreements and accepted the second labeller's answer on every one. The reference labels the classifiers are scored against (`labeller: adjudicated`) are therefore identical to the language model's. Operator is kept where the two agreed and set to `unknown` where they did not, because it was not reviewed.
+
+That last fact is the largest limitation in the evaluation, and it bears directly on the result: a reference written by one language model may favour another. It is tested rather than assumed — every classifier is also scored against the first labeller's independent labels, and the ranking does not change. The results and that check are in [`model-comparison.md`](model-comparison.md).
