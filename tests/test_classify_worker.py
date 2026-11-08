@@ -21,6 +21,7 @@ from honeypot_ai.classify.worker import (
     ClassifyStats,
     DailyShare,
     classify_by_sequence,
+    classify_pending,
     classify_sessions,
     daily_unmatched,
     pending_sessions,
@@ -412,6 +413,61 @@ def test_an_answer_under_an_older_taxonomy_is_not_reused(db) -> None:  # type: i
     assert len(model.asked) == 1
     rows = db.query(SessionLabelRow).filter_by(classifier="gemini").all()
     assert {row.taxonomy_version for row in rows} == {TAXONOMY_VERSION}
+
+
+# --- Paging -------------------------------------------------------------------
+
+
+@needs_db
+def test_every_pending_session_is_labelled_across_pages(db) -> None:  # type: ignore[no-untyped-def]
+    for i in range(5):
+        add_session(db, f"s{i}", "uname -a", minutes_ago=i)
+    model = Counting()
+
+    stats = classify_pending(db, model, "rules", page_size=2)
+
+    assert stats.labelled == 5
+    assert len(model.asked) == 5
+    assert set(labelled(db, "rules")) == {f"s{i}" for i in range(5)}
+
+
+@needs_db
+def test_a_session_that_always_fails_does_not_trap_the_run(db) -> None:  # type: ignore[no-untyped-def]
+    """It stays pending; the cursor moves past it instead of fetching it again."""
+    for i in range(3):
+        add_session(db, f"s{i}", "uname -a", minutes_ago=i)
+
+    def fails_on_s1(facts: SessionFacts) -> Label:
+        if facts.session_id == "s1":
+            raise RuntimeError("bad reply")
+        return label_for(facts)
+
+    stats = classify_pending(db, fails_on_s1, "rules", page_size=1)
+
+    assert stats.failed == 1
+    assert set(labelled(db, "rules")) == {"s0", "s2"}
+
+
+@needs_db
+def test_relabelling_visits_every_session_exactly_once(db) -> None:  # type: ignore[no-untyped-def]
+    for i in range(5):
+        add_session(db, f"s{i}", "uname -a", minutes_ago=i)
+    classify_pending(db, Counting(), "rules", page_size=2)
+    model = Counting()
+
+    stats = classify_pending(db, model, "rules", page_size=2, reclassify=True)
+
+    assert len(model.asked) == 5
+    assert stats.replaced == 5
+
+
+@needs_db
+def test_the_limit_holds_across_pages(db) -> None:  # type: ignore[no-untyped-def]
+    for i in range(5):
+        add_session(db, f"s{i}", "uname -a", minutes_ago=i)
+    stats = classify_pending(db, Counting(), "rules", limit=3, page_size=2)
+    assert stats.labelled == 3
+    assert set(labelled(db, "rules")) == {"s0", "s1", "s2"}  # newest first
 
 
 @pytest.fixture

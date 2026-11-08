@@ -13,6 +13,7 @@ Agreement between labellers:
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | majority class | 140 | — | 0.21 | 0.04 | 0.40 | 0.07 | 0.74 |
 | rules | 140 | 0 | 0.74 | 0.69 | 0.80 | 0.72 | 0.90 |
+| rules:v0.6.0 | 140 | 0 | 0.76 | 0.71 | 0.80 | 0.72 | 0.90 |
 | gemini:gemini-3.5-flash-lite | 140 | 0 | 0.85 | 0.78 | 0.80 | 0.64 | 0.89 |
 | ollama:qwen2.5:1.5b | 140 | 0 | 0.17 | 0.11 | 0.17 | 0.07 | 0.05 |
 
@@ -20,8 +21,11 @@ Paired comparison (exact McNemar test on the items both answered):
 
 | First | Second | Only first right | Only second right | p |
 | --- | --- | ---: | ---: | ---: |
+| rules | rules:v0.6.0 | 0 | 3 | 0.2500 |
 | rules | gemini:gemini-3.5-flash-lite | 12 | 28 | 0.0166 |
 | rules | ollama:qwen2.5:1.5b | 79 | 0 | 0.0000 |
+| rules:v0.6.0 | gemini:gemini-3.5-flash-lite | 12 | 25 | 0.0470 |
+| rules:v0.6.0 | ollama:qwen2.5:1.5b | 82 | 0 | 0.0000 |
 | gemini:gemini-3.5-flash-lite | ollama:qwen2.5:1.5b | 98 | 3 | 0.0000 |
 
 ## rules
@@ -55,6 +59,42 @@ Confusion matrix (rows: reference, columns: prediction):
 | shell_probing | 0 | 0 | 1 | 13 | 0 | 0 | 0 | 12 |
 | resource_profiling | 0 | 0 | 0 | 0 | 12 | 0 | 0 | 0 |
 | staging | 0 | 0 | 1 | 4 | 4 | 20 | 0 | 0 |
+| persistence | 0 | 0 | 0 | 0 | 0 | 0 | 20 | 0 |
+| other | 0 | 1 | 1 | 1 | 0 | 0 | 0 | 1 |
+
+Latency per item: median 0.00 s, p90 0.00 s, total 0.2 s. No model was called, so there is no token cost.
+
+## rules:v0.6.0
+
+| Part | Items | Accuracy | Macro-F1 | Baseline accuracy | Baseline macro-F1 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| all | 140 | 0.76 | 0.71 | 0.21 | 0.04 |
+| uniform | 60 | 0.80 | 0.72 | 0.40 | 0.07 |
+| stratified | 80 | 0.72 | 0.61 | 0.25 | 0.05 |
+
+Accuracy by session (weighted): 0.90.
+
+| Intent | Precision | Recall | F1 | Support | Recall, uniform | Support, uniform |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| credential_access | 0.67 | 0.50 | 0.57 | 4 | 1.00 | 1 |
+| fingerprinting | 0.75 | 0.65 | 0.70 | 23 | 0.71 | 14 |
+| other | 0.05 | 0.25 | 0.08 | 4 | 0.00 | 2 |
+| persistence | 1.00 | 1.00 | 1.00 | 20 | 1.00 | 1 |
+| protocol_probe | 1.00 | 0.91 | 0.95 | 22 | 0.50 | 2 |
+| resource_profiling | 0.92 | 1.00 | 0.96 | 12 | 1.00 | 2 |
+| shell_probing | 0.62 | 0.50 | 0.55 | 26 | 0.93 | 14 |
+| staging | 1.00 | 0.79 | 0.88 | 29 | 0.83 | 24 |
+
+Confusion matrix (rows: reference, columns: prediction):
+
+| | protocol probe | credential access | fingerprinting | shell probing | resource profiling | staging | persistence | other |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| protocol_probe | 20 | 0 | 2 | 0 | 0 | 0 | 0 | 0 |
+| credential_access | 0 | 2 | 0 | 0 | 0 | 0 | 0 | 2 |
+| fingerprinting | 0 | 0 | 15 | 3 | 0 | 0 | 0 | 5 |
+| shell_probing | 0 | 0 | 1 | 13 | 0 | 0 | 0 | 12 |
+| resource_profiling | 0 | 0 | 0 | 0 | 12 | 0 | 0 | 0 |
+| staging | 0 | 0 | 1 | 4 | 1 | 23 | 0 | 0 |
 | persistence | 0 | 0 | 0 | 0 | 0 | 0 | 20 | 0 |
 | other | 0 | 1 | 1 | 1 | 0 | 0 | 0 | 1 |
 

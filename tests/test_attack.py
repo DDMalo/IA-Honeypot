@@ -165,3 +165,66 @@ def test_a_bundle_becomes_a_catalogue() -> None:
 def test_the_written_file_reads_back_as_the_same_catalogue() -> None:
     derived = derive(bundle(), "f" * 64)
     assert json.loads(dumps(derived)) == derived
+
+
+# --- Behaviours to techniques -------------------------------------------------
+
+
+def test_every_behaviour_has_a_decision() -> None:
+    """A behaviour added to the taxonomy must be mapped, or explicitly not."""
+    from honeypot_ai.attack.mapping import MAPPING
+    from honeypot_ai.classify.taxonomy import Behaviour
+
+    assert set(MAPPING) == set(Behaviour)
+    assert all(row.why for row in MAPPING.values())
+
+
+def test_every_mapped_technique_is_current_in_the_pinned_release() -> None:
+    from honeypot_ai.attack.mapping import MAPPING
+
+    for row in MAPPING.values():
+        for technique_id in row.techniques:
+            load().require(technique_id)
+
+
+def test_a_heredoc_dropper_maps_to_tool_transfer_and_decoding() -> None:
+    from honeypot_ai.attack.mapping import techniques_for
+    from honeypot_ai.classify.taxonomy import Behaviour
+
+    found = techniques_for(
+        [Behaviour.PAYLOAD_WRITE, Behaviour.BASE64_DECODE, Behaviour.CPU_PROFILING]
+    )
+    assert [t.id for t in found] == ["T1082", "T1105", "T1140"]
+
+
+def test_two_behaviours_with_the_same_technique_report_it_once() -> None:
+    from honeypot_ai.attack.mapping import techniques_for
+    from honeypot_ai.classify.taxonomy import Behaviour
+
+    found = techniques_for([Behaviour.SSH_DIR_RESET, Behaviour.AUTHORIZED_KEYS_WRITE])
+    assert [t.id for t in found] == ["T1098.004"]
+
+
+def test_a_mapping_gone_stale_raises_instead_of_reporting() -> None:
+    """What happens when the catalogue moves to a release that revoked one."""
+    from honeypot_ai.attack.mapping import techniques_for
+    from honeypot_ai.classify.taxonomy import Behaviour
+
+    stale = parse(
+        {
+            "attack": {"version": "x", "modified": "x", "source_sha256": "x"},
+            "attribution": "x",
+            "tactics": [],
+            "techniques": [
+                {
+                    "id": "T1105",
+                    "name": "Ingress Tool Transfer",
+                    "tactics": [],
+                    "status": "revoked",
+                    "revoked_by": "T9000",
+                },
+            ],
+        }
+    )
+    with pytest.raises(RetiredTechnique, match="use T9000"):
+        techniques_for([Behaviour.PAYLOAD_DOWNLOAD], stale)
