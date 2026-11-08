@@ -51,9 +51,11 @@ Direction matters: the homelab always initiates. The sensor holds no credential 
 ### Classification writes several answers, not one
 
 `session_labels` is keyed by `(session_id, classifier)`, so the rule engine and
-each language model record their own conclusion about the same session, and a
-human analyst joins them as another classifier in v0.5.0 rather than needing a
-table of their own.
+each language model record their own conclusion about the same session. In
+production the rules label every session and Gemini labels each distinct
+command sequence once; both answers stay. The hand labels that scored them
+are kept apart, in `eval/labels.jsonl`, because they were made on an
+anonymised sample that can be published and the database cannot.
 
 Collapsing that to one label per session would be the obvious schema and the
 wrong one. Agreement between classifiers carries no information; the

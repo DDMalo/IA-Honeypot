@@ -17,8 +17,8 @@ arrangement the evaluation in v0.5.0 needs.
 writes the answer to every session that shared it; `--limit` then counts
 classifier calls rather than sessions. It is how the language model runs on a
 schedule: the evaluation found Gemini more accurate than the rules (0.85 to
-0.74 on 140 labelled sequences), and a month of traffic holds under a thousand
-distinct sequences, which a free quota absorbs.
+0.74 on 140 labelled sequences), and new distinct sequences arrive at about a
+hundred a day, which a free quota absorbs.
 """
 
 from __future__ import annotations
