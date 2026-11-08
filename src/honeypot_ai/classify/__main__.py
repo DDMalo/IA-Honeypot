@@ -2,6 +2,7 @@
 
     python -m honeypot_ai.classify --classifier rules
     python -m honeypot_ai.classify --classifier gemini --limit 200
+    python -m honeypot_ai.classify --classifier gemini --by-sequence --limit 200
 
 Safe to re-run: a session already labelled by this classifier under the
 current taxonomy is skipped, so the rule engine can run on a timer every few
@@ -11,6 +12,13 @@ sessions.
 Each classifier writes under its own name, and they do not overwrite each
 other. Running all three leaves three labels per session, which is the
 arrangement the evaluation in v0.5.0 needs.
+
+`--by-sequence` asks the classifier once per distinct command sequence and
+writes the answer to every session that shared it; `--limit` then counts
+classifier calls rather than sessions. It is how the language model runs on a
+schedule: the evaluation found Gemini more accurate than the rules (0.85 to
+0.74 on 140 labelled sequences), and new distinct sequences arrive at about a
+hundred a day, which a free quota absorbs.
 """
 
 from __future__ import annotations
@@ -33,6 +41,7 @@ from honeypot_ai.classify.worker import (
     DEFAULT_BATCH_SIZE,
     OTHER_SHARE_THRESHOLD,
     Classifier,
+    classify_by_sequence,
     classify_sessions,
     daily_unmatched,
     pending_sessions,
@@ -143,6 +152,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument(
+        "--by-sequence",
+        action="store_true",
+        help="classify each distinct command sequence once and copy the answer to "
+        "every session that shares it; --limit then counts classifier calls",
+    )
+    parser.add_argument(
         "--reclassify",
         action="store_true",
         help="relabel sessions this classifier has already answered for, "
@@ -176,6 +191,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.audit:
         with session_factory()() as db:
             return _audit(db, name)
+
+    if args.by_sequence:
+        if args.reclassify or args.dry_run:
+            print("--by-sequence cannot be used with --reclassify or --dry-run.", file=sys.stderr)
+            return 2
+        with session_factory()() as db:
+            print(f"{name}, taxonomy v{TAXONOMY_VERSION}, by sequence")
+            print(classify_by_sequence(db, classifier, name, args.limit))
+        return 0
 
     with session_factory()() as db:
         rows = pending_sessions(db, name, args.limit, reclassify=args.reclassify)

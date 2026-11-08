@@ -144,6 +144,26 @@ INTENT_PRECEDENCE: tuple[Intent, ...] = (
     Intent.PERSISTENCE,
 )
 
+#: One line per intent, in precedence order, and the only wording of them
+#: that exists. The language-model prompt is built from this, and the
+#: labelling tool shows the same lines to the person labelling.
+#:
+#: That is the point of keeping it here. An evaluation compares a classifier's
+#: answers with a human's, and it only measures the classifier if both were
+#: working from the same definitions. A labeller reading one description and
+#: a model reading another produces a disagreement about wording that looks
+#: exactly like a disagreement about sessions.
+INTENT_DEFINITIONS: dict[Intent, str] = {
+    Intent.PROTOCOL_PROBE: "spoke HTTP, SIP or another protocol; never used the shell",
+    Intent.CREDENTIAL_ACCESS: "logged in and issued nothing",
+    Intent.FINGERPRINTING: "established what the host is, then left",
+    Intent.SHELL_PROBING: "tried to get, or confirm, a usable shell",
+    Intent.RESOURCE_PROFILING: "measured what the machine is worth (CPU, GPU, uptime)",
+    Intent.STAGING: "prepared for a payload: writable directory, chmod, fetch",
+    Intent.PERSISTENCE: "installed a way back in: authorized_keys, cron, accounts",
+    Intent.OTHER: "genuinely fits none of the above",
+}
+
 
 class Behaviour(StrEnum):
     """Something observable the session did. Zero or more per session.

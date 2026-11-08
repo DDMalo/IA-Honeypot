@@ -518,3 +518,51 @@ def test_an_ordinary_echo_is_not_a_marker() -> None:
     """The marker pattern matches shouted tokens, not every use of echo."""
     label = classify(SessionFacts(session_id="s", commands=("echo hello world",)))
     assert Behaviour.MARKER_ECHO not in label.behaviours
+
+
+# --- Running a payload that has no extension ---------------------------------
+#
+# The 13 October dropper wrote an ARM binary through `echo -ne`, made it
+# executable and ran it — and was filed as shell_probing, because execution
+# was only recognised for files ending in `.sh` or `.bin`. IoT payloads are
+# called `.d`, `dvrHelper`, `mirai.arm7`. Found while testing the labelling
+# tool, before the evaluation sample was drawn.
+
+
+@pytest.mark.parametrize(
+    "commands",
+    [
+        ("/bin/busybox chmod +x .d; ./.d; ./dvrHelper selfrep",),
+        ("chmod +x .d; ./.d",),
+        ("./mirai.arm7 telnet",),
+        ("cd /tmp", "sh .k"),
+    ],
+)
+def test_running_an_extensionless_payload_is_staging(commands: tuple[str, ...]) -> None:
+    label = classify(SessionFacts(session_id="s", commands=commands))
+    assert Behaviour.PAYLOAD_EXECUTION in label.behaviours
+    assert label.intent is Intent.STAGING
+
+
+@pytest.mark.parametrize("commands", [("cd ./www",), ("ls ./",), ("sh -c 'echo hi'",)])
+def test_a_path_or_an_option_is_not_execution(commands: tuple[str, ...]) -> None:
+    label = classify(SessionFacts(session_id="s", commands=commands))
+    assert Behaviour.PAYLOAD_EXECUTION not in label.behaviours
+
+
+def test_the_bare_shell_escape_is_still_not_execution() -> None:
+    """`sh` on its own is the escape word for a restricted menu, not a payload."""
+    label = classify(SessionFacts(session_id="s", commands=("enable", "system", "shell", "sh")))
+    assert Behaviour.PAYLOAD_EXECUTION not in label.behaviours
+    assert label.intent is Intent.SHELL_PROBING
+
+
+def test_a_shebang_is_not_a_shell_running_the_next_line() -> None:
+    """`#!/bin/sh` then a newline once read as `sh for`."""
+    label = classify(facts("#!/bin/sh\nfor x in a b; do echo $x; done"))
+    assert Behaviour.PAYLOAD_EXECUTION not in label.behaviours
+
+
+def test_a_pasted_script_that_runs_a_payload_on_its_own_line_is_caught() -> None:
+    label = classify(facts("cd /tmp\nchmod +x .d\n./.d"))
+    assert Behaviour.PAYLOAD_EXECUTION in label.behaviours

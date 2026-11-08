@@ -470,9 +470,9 @@ Expect modest numbers. The sensor denies outbound traffic, so `wget` and `curl` 
 
 ## Classification
 
-The rule engine labels sessions from their commands, using the vocabulary in [`docs/taxonomy.md`](../../docs/taxonomy.md). It exists to be beaten: it is the baseline the language model has to improve on, and on data this repetitive it will not be easy.
+The rule engine labels sessions from their commands, using the vocabulary in [`docs/taxonomy.md`](../../docs/taxonomy.md). It exists to be beaten: it is the baseline the language model has to improve on. In v0.5.0 the model did, on 140 hand-labelled sequences — see [`docs/model-comparison.md`](../../docs/model-comparison.md) — and both now run in production, as described under [Storing the labels](#storing-the-labels).
 
-Nothing is written to the database yet — storing classifications comes with the pipeline integration. This reads:
+To look at what the rules make of the corpus without writing anything:
 
 ```bash
 cd ~/IA-Honeypot
@@ -517,7 +517,7 @@ Nothing is written. It prints each session's commands, the rule engine's answer 
 
 Requests are paced at one every four seconds, which is a conservative floor rather than a claim about the current quota. If the API starts answering 429, check Google's own documentation for the limits that apply to your key.
 
-Expect disagreements, and expect some of them to be the model being right. That is the point of building it. The measured version of this comparison — with a labelled set and real metrics — is v0.5.0.
+Expect disagreements, and expect some of them to be the model being right. That is the point of building it. The measured version of this comparison, with a labelled set and real metrics, is in [`docs/model-comparison.md`](../../docs/model-comparison.md): the model was right more often.
 
 ### Running a model locally
 
@@ -598,6 +598,7 @@ set -a && . ./.env && set +a
 python -m honeypot_ai.classify --dry-run             # rehearse
 python -m honeypot_ai.classify                       # the rule engine
 python -m honeypot_ai.classify --classifier gemini --limit 200
+python -m honeypot_ai.classify --classifier gemini --by-sequence --limit 200
 ```
 
 Safe to re-run. A session already labelled by that classifier under the
@@ -606,9 +607,11 @@ model is pointed at a bounded number of sessions by hand.
 
 ### Every classifier keeps its own answer
 
-Labels are keyed by `(session_id, classifier)`, so the rule engine, each model
-and — from v0.5.0 — a human analyst all write their own row for the same
-session. Running all three leaves three labels per session.
+Labels are keyed by `(session_id, classifier)`, so the rule engine and each
+model write their own row for the same session. Running all three leaves three
+labels per session. (The hand labels used to evaluate them live in
+`eval/labels.jsonl` rather than here: they were made on an anonymised sample
+that has to be publishable, which the database never is.)
 
 That is the point. Storing a single "best" label would be smaller and would
 throw away the only part worth having: where two classifiers agree there is
@@ -653,22 +656,54 @@ python -m honeypot_ai.classify --reclassify
 
 ### On a timer
 
-Only the rule engine is scheduled. It is deterministic, costs nothing and
-takes milliseconds per session, so labelling everything as it arrives is free:
+Two classifiers are scheduled, each the way its cost allows.
+
+**The rules label every session as it arrives.** They are deterministic, cost
+nothing and take milliseconds per session:
 
 ```bash
 sudo install -m 0644 cowrie-classify.service /etc/systemd/system/
 sudo install -m 0644 cowrie-classify.timer /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now cowrie-classify.timer
-systemctl list-timers 'cowrie-*'
+systemctl list-timers cowrie-classify.timer
 ```
 
-The language-model classifiers are deliberately left off the timer. Gemini is
-metered and Ollama takes twenty seconds a session on this hardware, so both are
-run deliberately over a bounded number of sessions. A timer that quietly spends
-a quota is a worse failure than a timer that does not exist — and this
-deployment has already paid to learn that, two sections up.
+Check that last line lists the timer. In this deployment it once did not: the
+unit files were in the repository, the rules had been run by hand, and for ten
+days nobody noticed that nothing was running them — a classifier that does not
+run produces no errors, only a label count that stops moving.
+
+**Gemini labels each distinct command sequence once, daily.** It was the more
+accurate classifier in the v0.5.0 evaluation, but it is metered, and a timer
+that quietly spends a quota is a worse failure than a timer that does not
+exist — this deployment has already paid to learn that, two sections up. So it
+runs with `--by-sequence`: sessions are grouped by their exact command
+sequence and whether the login succeeded, the model is asked once per group,
+and the answer is copied to every session in it. A sequence answered before is
+never asked again. `--limit 200` caps the model calls per run, not the
+sessions; what is left waits for the next run, newest first. A sequence the
+model declines to answer is not stored, so it is retried the next day rather
+than marked done with a refusal.
+
+```bash
+sudo install -m 0644 cowrie-classify-llm.service /etc/systemd/system/
+sudo install -m 0644 cowrie-classify-llm.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowrie-classify-llm.timer
+systemctl list-timers 'cowrie-*'
+journalctl -u cowrie-classify-llm.service --since today | tail -3
+```
+
+The last line of a run says how many sequences were pending, how many the model
+classified, how many were answered from an earlier label, and how many were
+left for the next run. If "left for the next run" grows from one day to the
+next, the cap is below the rate new sequences arrive, and either the cap or the
+plan has to change.
+
+Ollama is not scheduled. The 1.5B model that fits this machine scored below
+the majority-class baseline in the evaluation, so there is nothing for it to
+add.
 
 ## Retention
 

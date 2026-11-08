@@ -24,9 +24,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import Select, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session as DbSession
 from sqlalchemy.orm import selectinload
@@ -85,24 +85,45 @@ def pending_sessions(
     `reclassify` ignores existing labels entirely, for when the prompt or the
     rules changed rather than the vocabulary.
     """
-    existing = select(SessionLabelRow.session_id).where(
-        SessionLabelRow.classifier == classifier,
-        SessionLabelRow.taxonomy_version == TAXONOMY_VERSION,
-    )
+    return list(db.execute(pending_statement(classifier, limit, reclassify=reclassify)).scalars())
 
+
+def pending_statement(
+    classifier: str, limit: int | None = None, *, reclassify: bool = False
+) -> Select[SessionRow]:
+    """The query behind `pending_sessions`, separate so its shape can be tested.
+
+    **`NOT EXISTS`, never `NOT IN`.** The two mean the same here, and with a
+    few thousand labels they run the same. They part company when the label
+    set outgrows `work_mem`: PostgreSQL can then no longer hash the `NOT IN`
+    list and falls back to scanning every label for every session. On the
+    homelab that happened at 228,944 sessions and as many labels — a run that
+    had taken ninety seconds was still in its first query after twenty
+    minutes, with the timer waiting behind it. `NOT EXISTS` is planned as a
+    hash anti-join, which spills to disk instead of degrading, and answers the
+    same question in a tenth of a second at that size.
+    """
     statement = select(SessionRow).options(
         selectinload(SessionRow.commands),
         selectinload(SessionRow.login_attempts),
         selectinload(SessionRow.file_transfers),
     )
     if not reclassify:
-        statement = statement.where(SessionRow.session_id.not_in(existing))
+        labelled = (
+            select(SessionLabelRow.session_id)
+            .where(
+                SessionLabelRow.session_id == SessionRow.session_id,
+                SessionLabelRow.classifier == classifier,
+                SessionLabelRow.taxonomy_version == TAXONOMY_VERSION,
+            )
+            .exists()
+        )
+        statement = statement.where(~labelled)
 
     statement = statement.order_by(SessionRow.started_at.desc())
     if limit is not None:
         statement = statement.limit(limit)
-
-    return list(db.execute(statement).scalars().all())
+    return statement
 
 
 def classify_sessions(
@@ -220,6 +241,208 @@ def classify_pending(
     rows = pending_sessions(db, name, limit, reclassify=reclassify)
     logger.info("%d sessions to classify with %s", len(rows), name)
     return classify_sessions(db, classifier, name, rows, batch_size)
+
+
+# --- One answer per distinct sequence ---------------------------------------
+#
+# The corpus is mostly repetition: one campaign was 2,555 sessions of the same
+# command, and a month of 156,739 sessions held only 950 distinct sequences. A
+# language model asked about every session would be asked the same question
+# thousands of times and charged for each. Grouping by sequence asks once and
+# writes the answer to every session that shared it, which turns a quota that
+# could never keep up into one that is mostly idle.
+#
+# The grouping key is the one the evaluation sample uses — the exact command
+# sequence plus whether the login succeeded — so "a sequence" means the same
+# thing in the evaluation and in production. That is also what makes the
+# reuse sound: a classifier sees only the commands and the login outcome, so
+# two sessions with the same key are, to it, the same input.
+
+#: Every session with its sequence key and whether this classifier has a
+#: current label for it. `md5` is a grouping key, not a security control.
+_SEQUENCES = text(
+    """
+    WITH fingerprints AS (
+        SELECT s.session_id,
+               s.started_at,
+               md5(
+                   coalesce(string_agg(c.input, E'\\n' ORDER BY c.seq), '')
+                   || '|' || s.authenticated::text
+               ) AS fingerprint
+        FROM sessions s
+        LEFT JOIN commands c ON c.session_id = s.session_id
+        GROUP BY s.session_id, s.started_at, s.authenticated
+    )
+    SELECT f.fingerprint, f.session_id, f.started_at, l.session_id IS NOT NULL AS labelled
+    FROM fingerprints f
+    LEFT JOIN session_labels l
+      ON l.session_id = f.session_id
+     AND l.classifier = :classifier
+     AND l.taxonomy_version = :version
+    """
+)
+
+
+@dataclass
+class SequenceStats:
+    """What a by-sequence run did, in the units that cost something."""
+
+    sequences_pending: int = 0
+    model_calls: int = 0
+    reused: int = 0
+    sessions_labelled: int = 0
+    unclassified: int = 0
+    failed: int = 0
+    left_for_later: int = 0
+
+    def __str__(self) -> str:
+        parts = [
+            f"{self.sequences_pending} sequences pending",
+            f"{self.model_calls} classified",
+            f"{self.reused} answered from an earlier label",
+            f"{self.sessions_labelled} sessions labelled",
+        ]
+        if self.unclassified:
+            parts.append(f"{self.unclassified} unclassified, to retry")
+        if self.failed:
+            parts.append(f"{self.failed} failed")
+        if self.left_for_later:
+            parts.append(f"{self.left_for_later} left for the next run")
+        return ", ".join(parts)
+
+
+@dataclass
+class _Group:
+    fingerprint: str
+    newest: datetime
+    pending: list[str]
+    labelled: list[str]
+
+
+def _pending_groups(db: DbSession, classifier: str) -> list[_Group]:
+    """Sequences with at least one session still owed a label, newest first."""
+    groups: dict[str, _Group] = {}
+    rows = db.execute(_SEQUENCES, {"classifier": classifier, "version": TAXONOMY_VERSION})
+    for row in rows:
+        group = groups.setdefault(row.fingerprint, _Group(row.fingerprint, row.started_at, [], []))
+        (group.labelled if row.labelled else group.pending).append(row.session_id)
+        if row.started_at > group.newest:
+            group.newest = row.started_at
+    pending = [group for group in groups.values() if group.pending]
+    # Newest first, like the per-session worker: a run cut short by a quota
+    # leaves the most recent traffic labelled. Ties broken by key, so the
+    # order does not depend on how the database returned the rows.
+    return sorted(pending, key=lambda g: (g.newest, g.fingerprint), reverse=True)
+
+
+def classify_by_sequence(
+    db: DbSession,
+    classifier: Classifier,
+    name: str,
+    max_calls: int | None = None,
+) -> SequenceStats:
+    """Label every pending session, calling the classifier once per sequence.
+
+    A sequence this classifier has already answered for, under the current
+    taxonomy, is not asked again: the existing answer is copied to the new
+    sessions that share it. `max_calls` bounds the classifier calls, not the
+    sessions, because the calls are what a quota counts.
+
+    A sequence the classifier declines to answer is not written. Storing the
+    refusal would mark every session sharing it as done and it would never be
+    asked again; leaving it pending means the next run retries it, and the
+    call limit stops a sequence that always fails from eating the quota.
+    """
+    groups = _pending_groups(db, name)
+    stats = SequenceStats(sequences_pending=len(groups))
+
+    for group in groups:
+        if group.labelled:
+            source = db.get(SessionLabelRow, (min(group.labelled), name))
+            if source is None:  # deleted between the read and now
+                continue
+            writes = [
+                _row(
+                    session_id,
+                    name,
+                    source.intent,
+                    source.behaviours,
+                    source.operator,
+                    source.confidence,
+                    source.rationale,
+                )
+                for session_id in group.pending
+            ]
+            stats.reused += 1
+        else:
+            if max_calls is not None and stats.model_calls >= max_calls:
+                stats.left_for_later += 1
+                continue
+            # Any member will do: to the classifier they are the same input.
+            representative = _load_session(db, min(group.pending))
+            stats.model_calls += 1
+            try:
+                label = classifier(facts_from_row(representative))
+            except Exception:
+                logger.exception("Classifier %s failed on sequence %s", name, group.fingerprint)
+                stats.failed += 1
+                continue
+            if label.intent is Intent.OTHER and label.confidence == 0.0:
+                stats.unclassified += 1
+                continue
+            writes = [
+                _row(
+                    session_id,
+                    name,
+                    str(label.intent),
+                    sorted(str(b) for b in label.behaviours),
+                    str(label.operator),
+                    label.confidence,
+                    label.notes,
+                )
+                for session_id in group.pending
+            ]
+
+        for chunk_start in range(0, len(writes), DEFAULT_BATCH_SIZE):
+            _write(db, writes[chunk_start : chunk_start + DEFAULT_BATCH_SIZE])
+        db.commit()
+        stats.sessions_labelled += len(writes)
+
+    return stats
+
+
+def _load_session(db: DbSession, session_id: str) -> SessionRow:
+    statement = (
+        select(SessionRow)
+        .where(SessionRow.session_id == session_id)
+        .options(
+            selectinload(SessionRow.commands),
+            selectinload(SessionRow.login_attempts),
+            selectinload(SessionRow.file_transfers),
+        )
+    )
+    return db.execute(statement).scalar_one()
+
+
+def _row(
+    session_id: str,
+    classifier: str,
+    intent: str,
+    behaviours: Sequence[str],
+    operator: str,
+    confidence: float | None,
+    rationale: str | None,
+) -> dict[str, object]:
+    return {
+        "session_id": session_id,
+        "classifier": classifier,
+        "intent": intent,
+        "behaviours": list(behaviours),
+        "operator": operator,
+        "confidence": confidence,
+        "rationale": rationale,
+        "taxonomy_version": TAXONOMY_VERSION,
+    }
 
 
 #: Above this share of `other` the rules or the taxonomy have a gap, and
