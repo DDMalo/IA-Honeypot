@@ -1,0 +1,15 @@
+# Hourly. The tightest threshold is two hours, so an hourly check notices a
+# stopped stage within three; checking more often would only repeat the same
+# verdict, and the notifier already stays quiet until it changes.
+
+[Unit]
+Description=Check the honeypot pipeline's freshness hourly
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1h
+RandomizedDelaySec=120s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
