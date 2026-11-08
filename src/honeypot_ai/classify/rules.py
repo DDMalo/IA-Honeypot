@@ -219,9 +219,41 @@ RULES: tuple[Rule, ...] = (
     ),
     _rule(
         Behaviour.PAYLOAD_DOWNLOAD,
-        r"\bwget\b|\bcurl\b|\btftp\b|\bftpget\b|\bnc\s+\S+\s+\d+\s*>",
+        r"\bwget\b|\bcurl\b|\btftp\b|\bftpget\b|\bnc\s+\S+\s+\d+\s*>"
+        # A copy *from* a remote host. Added in v0.6.0: two sessions in the
+        # evaluation set fetched their next stage with a planted key and
+        # `scp -i key.ppk user@host:sh out_sh`, and no rule saw a download.
+        # The remote side must come before a local destination: `scp a
+        # user@host:/tmp/` is an upload, which is something else entirely.
+        r"|\bscp\b[^\n;|&]*\s\S+@[^\s:]+:\S*\s+[^\s;|&-]",
         Intent.STAGING,
         "fetching the payload; blocked on this sensor, but the attempt counts",
+    ),
+    _rule(
+        Behaviour.PAYLOAD_WRITE,
+        # Hex escapes written to a file. At least five escapes, or four and the
+        # anonymiser's marker for the rest: the evaluation set is exported with
+        # long runs cut to four bytes, and the rules must reach the same answer
+        # on both sides of that cut — the export refuses to write a file where
+        # they do not. Four alone is not enough: `echo -e "\x50\x6f\x72\x74/tmp"
+        # > /tmp/.none` spells `Port` to probe whether a directory is writable,
+        # and is not a payload. The marker is matched whole, closing `>`
+        # included, so that it cannot itself pass for the redirection.
+        r"echo\s+-\w*e\w*\s+[\"']?(\\x[0-9a-f]{2}){4}"
+        r"(\\x[0-9a-f]{2}|<\+\d+ bytes sha256:[0-9a-f]+>)[^>]*>"
+        # Base64 or uuencode decoded into a file, the shape of the heredoc that
+        # delivered a 64-bit ELF in the evaluation set and that the v0.5.0
+        # rules filed as resource_profiling.
+        r"|\bbase64\s+(-d|--decode)\b[^|;\n]*>\s*\S"
+        r"|\buudecode\b[^|;\n]*-o\s*\S",
+        Intent.STAGING,
+        "a payload written through the shell rather than downloaded",
+    ),
+    _rule(
+        Behaviour.BASE64_DECODE,
+        r"\bbase64\s+(-d|--decode)\b|\bopenssl\s+(base64|enc\s+-base64)\s+-d\b|\buudecode\b",
+        None,
+        "decoding on the host; a payload if written to a file, a tool check if not",
     ),
     # ---- Persistence -----------------------------------------------------
     _rule(
@@ -253,6 +285,12 @@ RULES: tuple[Rule, ...] = (
         r"\buseradd\b|\badduser\b|>>\s*/etc/passwd",
         Intent.PERSISTENCE,
         "an account of their own",
+    ),
+    _rule(
+        Behaviour.PASSWORD_CHANGE,
+        r"\|\s*(sudo\s+(-\w+\s+)*)?(chpasswd|passwd)\b|^\s*passwd\s+\w+\s*$",
+        Intent.PERSISTENCE,
+        "a password only the attacker knows; added in v0.6.0",
     ),
     # ---- Holding the box -------------------------------------------------
     _rule(

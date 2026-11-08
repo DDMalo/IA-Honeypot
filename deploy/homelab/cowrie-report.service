@@ -1,0 +1,24 @@
+# Writes last week's report to ~/honeypot-reports/weekly-<week>.md and sends a
+# summary to ntfy. Triggered by cowrie-report.timer.
+#
+# The report is aggregates only, as the privacy notes require, so it is safe
+# to publish; it is still not committed automatically, because which reports
+# go into the repository is a decision for a person.
+#
+# Written outside the clone on purpose. A report left untracked in the
+# clone's reports/ would block `git pull` the day the same week is published
+# from another machine, as happened once with the evaluation files.
+
+[Unit]
+Description=Write the honeypot's weekly report
+Documentation=https://github.com/DDMalo/IA-Honeypot
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=david
+WorkingDirectory=/home/david/IA-Honeypot
+EnvironmentFile=/home/david/IA-Honeypot/.env
+ExecStart=/home/david/IA-Honeypot/.venv/bin/python -m honeypot_ai.report weekly --notify --out-dir /home/david/honeypot-reports
+TimeoutStartSec=900

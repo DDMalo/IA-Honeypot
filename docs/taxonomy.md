@@ -28,7 +28,7 @@ A session gets exactly one **intent** and any number of **behaviours**.
 
 Intent answers *how far did this actor get, and what were they after?* It is single-valued because evaluation needs one correct answer per session.
 
-Behaviour answers *what did they actually do?* It is multi-valued, and it is the unit that maps to MITRE ATT&CK techniques in v0.6.0. Keeping the two apart means the ATT&CK mapping can grow without renegotiating the labels the classifier predicts.
+Behaviour answers *what did they actually do?* It is multi-valued, and it is the unit that maps to MITRE ATT&CK techniques ([`attack.md`](attack.md)). Keeping the two apart means the ATT&CK mapping can grow without renegotiating the labels the classifier predicts.
 
 A third, independent field records whether a human appeared to be at the keyboard: `automated`, `interactive` or `unknown`. In this dataset essentially everything is automated, and that is itself a finding worth stating rather than assuming.
 
@@ -142,12 +142,15 @@ That is a decision, not a fact. The alternative, labelling by whatever the sessi
 
 | Group | Labels |
 |---|---|
-| Discovery | `host_enumeration`, `user_enumeration`, `architecture_detection`, `cpu_profiling`, `gpu_detection`, `uptime_check`, `login_history_check`, `process_enumeration` |
-| Shell acquisition | `shell_escape`, `busybox_probe`, `marker_echo` |
-| Staging | `writable_dir_hunt`, `permission_change`, `execution_test`, `payload_download`, `payload_execution` |
-| Persistence | `ssh_dir_reset`, `immutable_flag_clear`, `authorized_keys_write`, `cron_install`, `account_creation` |
+| Discovery | `host_enumeration`, `user_enumeration`, `architecture_detection`, `cpu_profiling`, `gpu_detection`, `uptime_check`, `login_history_check`, `process_enumeration`, `filesystem_discovery`, `network_discovery` |
+| Not the shell at all | `http_request`, `sip_request` |
+| Shell acquisition | `shell_escape`, `sandbox_check`, `obfuscated_command`, `busybox_probe`, `marker_echo` |
+| Staging | `writable_dir_hunt`, `permission_change`, `execution_test`, `payload_download`, `payload_write`, `payload_execution`, `base64_decode` |
+| Persistence | `ssh_dir_reset`, `immutable_flag_clear`, `authorized_keys_write`, `cron_install`, `account_creation`, `password_change` |
 | Holding the box | `competitor_kill`, `history_clearing` |
 | Reaching outwards | `lateral_scan` |
+
+Several of these were added by the revisions further down; the table is the current vocabulary.
 
 Two of these deserve a note.
 
@@ -155,7 +158,7 @@ Two of these deserve a note.
 
 `competitor_kill` is malware removing other malware. Thirty sessions here run a loop over `/proc`, find every process whose executable has been deleted from disk, and kill it — a precise description of a fileless cryptominer, and of nothing legitimate. It is a behaviour rather than an intent because it is almost never the point of a session, only something done on the way.
 
-Behaviours are the layer that gets ATT&CK technique identifiers attached in v0.6.0, validated against the official data rather than typed from memory. No identifiers appear here, so there is one place to get them wrong instead of two.
+Behaviours are the layer that gets ATT&CK technique identifiers attached, validated against a pinned copy of the official data rather than typed from memory. The mapping and the reasoning behind each row are in [`attack.md`](attack.md). No identifiers appear here, so there is one place to get them wrong instead of two.
 
 ## What this taxonomy does not do
 
@@ -287,3 +290,19 @@ That reasoning confuses *not raising the ceiling* with *contributing nothing*. I
 **No new categories.** Every one of these sessions fits a label that already existed; what was wrong was the rules, not the vocabulary. So `TAXONOMY_VERSION` does not move and stored labels are not invalidated — the fix is `--reclassify`, which re-runs the rules against the same vocabulary.
 
 Worth separating, because the escape valve fires the same way for both and they need opposite responses. A missing category means the taxonomy cannot describe what it is seeing. An under-matching rule means it can describe it perfectly well and failed to notice. The first is a design problem; the second is a bug. This was the second, twice.
+
+## Fourth pass: three behaviours, and why the version did not move
+
+The evaluation set, labelled in v0.5.0, confirmed two gaps that had been written down as predictions before any label existed. All three sessions that wrote an ELF binary through a base64 heredoc came out of the rules as `resource_profiling`, because nothing recognised writing a program into the shell. And `scp` from a remote host was not recognised as a download.
+
+Three behaviours were added in v0.6.0:
+
+- `payload_write`: a program written to disk through the session itself, by `echo -ne` with hex escapes or by `base64 -d` fed from a heredoc. It is staging, like a download, because it is one: the tool arrives, just not over a second connection.
+- `base64_decode`: decoding base64 or uuencoded data on the host, with no intent of its own. Some sessions decode to write a file; others only check that the tool exists.
+- `password_change`: `passwd` or `chpasswd` on an existing account. Taking an account the owner would have to notice losing is persistence.
+
+`scp user@host:file .` now counts as `payload_download`. Uploading with `scp` does not, because nothing came in.
+
+**`TAXONOMY_VERSION` did not move.** The version exists so that a label written under one vocabulary is never read as if it were written under another. Adding behaviours does not change the meaning of any existing intent or behaviour, so a label written before is still true, only less detailed. Bumping the version would have marked every stored label stale, including the 140 hand-labelled evaluation items. Those carry intent only, so the new behaviours could not have made them wrong. The rules were re-run over the whole corpus with `--reclassify` instead, which gave every session the new behaviours.
+
+On the evaluation set, these rules score 0.76 accuracy and 0.71 macro-F1, up from 0.74 and 0.69. Exactly three items changed, the three heredoc sessions, all from wrong to right. That is a repair rather than a measurement: the rules were written after the set had shown where they failed, so both rows are kept in `eval/results.md`.

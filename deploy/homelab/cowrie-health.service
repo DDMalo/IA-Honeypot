@@ -1,0 +1,24 @@
+# Checks that every stage is still producing fresh data, and tells ntfy when
+# that changes. Triggered by cowrie-health.timer.
+#
+# The rule engine stopped twice in this deployment without a word — for ten
+# days its timer was never installed, and later a query never finished — and
+# neither logged an error, because a stage that does not run has nothing to log. This judges each
+# stage by the age of what it writes instead.
+#
+# Needs NTFY_TOPIC in .env. Exits 1 while any check fails, so the unit also
+# shows up in `systemctl --failed`.
+
+[Unit]
+Description=Check that the honeypot pipeline is producing fresh data
+Documentation=https://github.com/DDMalo/IA-Honeypot
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+User=david
+WorkingDirectory=/home/david/IA-Honeypot
+EnvironmentFile=/home/david/IA-Honeypot/.env
+ExecStart=/home/david/IA-Honeypot/.venv/bin/python -m honeypot_ai.health --notify
+TimeoutStartSec=300

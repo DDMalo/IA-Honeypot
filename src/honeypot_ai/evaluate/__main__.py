@@ -59,6 +59,7 @@ def build(kind: str, model: str | None) -> tuple[Classify, str, Callable[[Sessio
 def _predict(args: argparse.Namespace) -> int:
     items = read_sample(args.sample)
     classify, name, size = build(args.classifier, args.model)
+    name = args.record_as or name
     path = file_for(name, args.dir)
     print(f"{name}: {len(items)} items, predictions in {path}")
 
@@ -114,6 +115,13 @@ def main(argv: list[str] | None = None) -> int:
     pred = commands.add_parser("predict", help="run a classifier over the sample")
     pred.add_argument("--classifier", choices=["rules", "gemini", "ollama"], required=True)
     pred.add_argument("--model", default=None, help="model name; defaults to the configured one")
+    pred.add_argument(
+        "--as",
+        dest="record_as",
+        default=None,
+        help="record under this name instead, e.g. rules:v0.6.0, so a changed classifier "
+        "is scored beside the frozen one rather than skipped as already done",
+    )
     pred.add_argument("--limit", type=int, default=None, help="stop after this many new items")
     pred.add_argument("--sample", type=Path, default=DEFAULT_SAMPLE)
     pred.add_argument("--dir", type=Path, default=DEFAULT_DIR)

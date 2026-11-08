@@ -296,6 +296,9 @@ def test_a_path_that_looks_like_a_browser_is_not_a_user_agent() -> None:
         ("uname -a", "cat /proc/cpuinfo", "nproc"),
         ("enable", "system", "shell", "sh"),
         SPLIT_KEY_SESSION,
+        # v0.6.0 rules: a hex payload write, cut by the anonymiser to four bytes.
+        (r'echo -ne "\x7F\x45\x4C\x46\x01\x01\x01\x61\x00\x00\x00\x00" >> .d',),
+        (r'echo -e "\x50\x6f\x72\x74/tmp" > /tmp/.none',),
         # The heredoc delivery the rules are known to misread: whatever they
         # conclude about it must be the same before and after.
         ("base64 -d > /tmp/hum <<.", BLOB[:64], ZERO_LINES[0], ZERO_LINES[1], "uname -a"),

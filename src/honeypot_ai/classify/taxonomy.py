@@ -129,6 +129,15 @@ class Intent(StrEnum):
 #: `other` crossed its own threshold and the categories changed both times —
 #: and a labelled set that is quietly a mixture of two schemes is worse than
 #: one that is wrong, because nothing about it looks wrong.
+#:
+#: **Adding a behaviour is not such a change**, and does not bump this. Every
+#: existing behaviour keeps its meaning and every intent is untouched; a label
+#: written before the addition is still true, only less detailed. Bumping the
+#: version for it would discard the hand-labelled evaluation set, whose labels
+#: are intent-only and entirely unaffected, and send every sequence back to a
+#: metered model to be asked a question whose answer has not changed. v0.6.0
+#: added three behaviours this way; the rule engine is re-run over the corpus
+#: with `--reclassify`, which is free, so every session gets them.
 TAXONOMY_VERSION = 1
 
 
@@ -212,7 +221,17 @@ class Behaviour(StrEnum):
     PERMISSION_CHANGE = "permission_change"
     EXECUTION_TEST = "execution_test"
     PAYLOAD_DOWNLOAD = "payload_download"
+    PAYLOAD_WRITE = "payload_write"
+    """Writing a program to disk through the shell instead of fetching it:
+    `echo -ne "\\x7f\\x45..." >> .d` a few bytes at a time, or `base64 -d >
+    file` fed by a heredoc. Added in v0.6.0. The payload never crosses the
+    network, so a sensor that blocks downloads still receives it, and before
+    this the rules filed such sessions by whatever they did first."""
+
     PAYLOAD_EXECUTION = "payload_execution"
+    BASE64_DECODE = "base64_decode"
+    """Decoding base64 or uuencoded data on the host, whether to write a file
+    or only to check the tool exists. Added in v0.6.0."""
 
     # Persistence
     SSH_DIR_RESET = "ssh_dir_reset"
@@ -220,6 +239,11 @@ class Behaviour(StrEnum):
     AUTHORIZED_KEYS_WRITE = "authorized_keys_write"
     CRON_INSTALL = "cron_install"
     ACCOUNT_CREATION = "account_creation"
+    PASSWORD_CHANGE = "password_change"  # noqa: S105 - a behaviour name, not a password
+    """Setting an account's password, usually root's, through `passwd` or
+    `chpasswd`. Locks the owner out and keeps the attacker in. Added in
+    v0.6.0: the rules matched `useradd` but not this, though one campaign in
+    the corpus does it in every session."""
 
     # Keeping the box to themselves
     COMPETITOR_KILL = "competitor_kill"

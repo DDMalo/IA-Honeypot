@@ -705,6 +705,92 @@ Ollama is not scheduled. The 1.5B model that fits this machine scored below
 the majority-class baseline in the evaluation, so there is nothing for it to
 add.
 
+## Freshness checks
+
+Twice in this deployment the rule engine stopped and nothing said so: for ten
+days its timer had never been installed, and later a query stalled it. Neither
+logged an error, because a stage that does not run has nothing to log. So the
+check judges each stage by the age of the data it writes, not by whether a
+process exited cleanly:
+
+| Check | Fails when |
+|---|---|
+| `sessions` | the newest session started more than six hours ago |
+| `rules` | a session ingested more than two hours ago has no rule label |
+| `llm` | no language-model label has been written in thirty-six hours |
+
+```bash
+cd ~/IA-Honeypot
+source .venv/bin/activate
+set -a && . ./.env && set +a
+python -m honeypot_ai.health
+```
+
+It prints one line per check and exits 1 if any fails.
+
+### Notifications on a phone
+
+Messages go through [ntfy](https://ntfy.sh): an HTTP POST to a topic, which the
+ntfy app shows as a notification. There is no account. The topic name is the
+only secret, so make it long and random:
+
+```bash
+openssl rand -hex 16
+```
+
+Put the output in `.env` as `NTFY_TOPIC`, and subscribe to the same topic in the
+ntfy app. Then check that a message arrives:
+
+```bash
+python -m honeypot_ai.health --notify
+```
+
+A message is sent once when a check starts failing and once when it recovers,
+never every hour about the same fault: paging every hour trains a person to
+mute the app, and then the next failure is missed too. The last verdict is
+kept in `~/.local/state/honeypot-ai/health.json`. If ntfy cannot be reached, the
+state is not saved, so the next run tries again. Messages carry counts and
+times only, never an address or a command.
+
+### On a timer
+
+Hourly:
+
+```bash
+sudo install -m 0644 cowrie-health.service /etc/systemd/system/
+sudo install -m 0644 cowrie-health.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowrie-health.timer
+systemctl list-timers cowrie-health.timer
+```
+
+While a check fails, the unit also shows up in `systemctl --failed`.
+
+## Weekly report
+
+What the report contains, what it never contains and how to read it are in
+[`docs/weekly-report.md`](../../docs/weekly-report.md).
+
+```bash
+python -m honeypot_ai.report weekly --week 2026-W45 --out-dir ~/honeypot-reports
+```
+
+On a timer, Mondays at 07:10 UTC, with a three-line summary to the same ntfy
+topic:
+
+```bash
+sudo install -m 0644 cowrie-report.service /etc/systemd/system/
+sudo install -m 0644 cowrie-report.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now cowrie-report.timer
+systemctl list-timers cowrie-report.timer
+```
+
+Reports are written to `~/honeypot-reports/`, outside the clone. A report left
+untracked in the clone's `reports/` would block `git pull` the day the same
+week is published from another machine. Publishing is done by hand, from a PC,
+through a pull request.
+
 ## Retention
 
 Captured sessions contain IP addresses, which are personal data. Keeping them indefinitely needs a justification, so retention is enforced rather than intended. The reasoning, and what is kept where, is in [`docs/privacy.md`](../../docs/privacy.md).

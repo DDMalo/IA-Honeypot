@@ -26,7 +26,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime
 
-from sqlalchemy import Select, func, select, text
+from sqlalchemy import Select, func, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session as DbSession
 from sqlalchemy.orm import selectinload
@@ -56,6 +56,13 @@ class ClassifyStats:
     replaced: int = 0
     unclassified: int = 0
     failed: int = 0
+
+    def add(self, other: ClassifyStats) -> None:
+        self.pending += other.pending
+        self.labelled += other.labelled
+        self.replaced += other.replaced
+        self.unclassified += other.unclassified
+        self.failed += other.failed
 
     def __str__(self) -> str:
         parts = [f"{self.pending} sessions pending", f"{self.labelled} labelled"]
@@ -89,7 +96,11 @@ def pending_sessions(
 
 
 def pending_statement(
-    classifier: str, limit: int | None = None, *, reclassify: bool = False
+    classifier: str,
+    limit: int | None = None,
+    *,
+    reclassify: bool = False,
+    before: tuple[datetime, str] | None = None,
 ) -> Select[SessionRow]:
     """The query behind `pending_sessions`, separate so its shape can be tested.
 
@@ -120,7 +131,9 @@ def pending_statement(
         )
         statement = statement.where(~labelled)
 
-    statement = statement.order_by(SessionRow.started_at.desc())
+    if before is not None:
+        statement = statement.where(tuple_(SessionRow.started_at, SessionRow.session_id) < before)
+    statement = statement.order_by(SessionRow.started_at.desc(), SessionRow.session_id.desc())
     if limit is not None:
         statement = statement.limit(limit)
     return statement
@@ -228,6 +241,12 @@ def _write(db: DbSession, rows: list[dict[str, object]]) -> None:
     logger.info("Wrote %d labels", len(rows))
 
 
+#: Sessions loaded at once. Each comes with its commands, and the first full
+#: catch-up run peaked at 791 MB for 72,205 sessions on a machine with 3.2 GB;
+#: relabelling all 228,944 in one go would not have fitted.
+DEFAULT_PAGE_SIZE = 5000
+
+
 def classify_pending(
     db: DbSession,
     classifier: Classifier,
@@ -236,11 +255,30 @@ def classify_pending(
     batch_size: int = DEFAULT_BATCH_SIZE,
     *,
     reclassify: bool = False,
+    page_size: int = DEFAULT_PAGE_SIZE,
 ) -> ClassifyStats:
-    """Label every session this classifier owes an answer for."""
-    rows = pending_sessions(db, name, limit, reclassify=reclassify)
-    logger.info("%d sessions to classify with %s", len(rows), name)
-    return classify_sessions(db, classifier, name, rows, batch_size)
+    """Label every session this classifier owes an answer for, a page at a time.
+
+    Pages are walked by position — newest first, then by session ID — rather
+    than by asking again for whatever is still pending. A session the
+    classifier fails on stays pending, and a loop that asked again would be
+    handed it again forever; the cursor simply moves past it, and the next run
+    retries it. After each page the loaded rows are let go, so memory is bounded
+    by the page, not by the corpus.
+    """
+    total = ClassifyStats()
+    cursor: tuple[datetime, str] | None = None
+    while limit is None or total.pending < limit:
+        size = page_size if limit is None else min(page_size, limit - total.pending)
+        statement = pending_statement(name, size, reclassify=reclassify, before=cursor)
+        rows = list(db.execute(statement).scalars())
+        if not rows:
+            break
+        cursor = (rows[-1].started_at, rows[-1].session_id)
+        total.add(classify_sessions(db, classifier, name, rows, batch_size))
+        db.expunge_all()
+        logger.info("%d sessions classified so far with %s", total.pending, name)
+    return total
 
 
 # --- One answer per distinct sequence ---------------------------------------

@@ -1,0 +1,14 @@
+# Monday morning, UTC. The ISO week ended at midnight; by now the night's
+# sessions are ingested, the rules have run several times and Gemini has had
+# its daily turn, so the report describes a week that is fully labelled.
+
+[Unit]
+Description=Write the honeypot's weekly report every Monday
+
+[Timer]
+OnCalendar=Mon *-*-* 07:10:00
+RandomizedDelaySec=300s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
