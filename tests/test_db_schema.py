@@ -1,9 +1,9 @@
 """Tests for the database schema.
 
-These check the schema's shape without connecting to PostgreSQL, so CI needs no
-database. The migration itself is exercised against a real server by hand (see
-deploy/homelab/README.md); what matters here is that the model definitions keep
-the guarantees the ingestion worker relies on.
+These check the schema's shape without connecting to PostgreSQL. That the
+migrations build exactly this schema is checked against a real server by
+`tests/test_e2e.py`; what matters here is that the model definitions keep the
+guarantees the ingestion worker relies on.
 """
 
 from __future__ import annotations

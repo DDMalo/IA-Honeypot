@@ -15,7 +15,10 @@ from sqlalchemy import engine_from_config, pool
 from honeypot_ai.db import Base, database_url
 
 config = context.config
-config.set_main_option("sqlalchemy.url", database_url())
+# The config is an INI file underneath, where `%` starts an interpolation, and a
+# URL-encoded password is full of them (`p%40ss` for `p@ss`): unescaped, the
+# migrations refuse to start. Found by the end-to-end test.
+config.set_main_option("sqlalchemy.url", database_url().replace("%", "%%"))
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
