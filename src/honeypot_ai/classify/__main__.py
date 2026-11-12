@@ -18,7 +18,7 @@ writes the answer to every session that shared it; `--limit` then counts
 classifier calls rather than sessions. It is how the language model runs on a
 schedule: the evaluation found Gemini more accurate than the rules (0.85 to
 0.74 on 140 labelled sequences), and new distinct sequences arrive at about a
-hundred a day, which a free quota absorbs.
+hundred a day, half the daily cap of 200 calls.
 """
 
 from __future__ import annotations

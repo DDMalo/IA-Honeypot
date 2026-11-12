@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **An end-to-end test of the whole pipeline**, `tests/test_e2e.py`. It builds the schema with the Alembic migrations, as production does, in a PostgreSQL schema of its own, then runs three weeks of synthetic traffic through every stage in timer order: ingestion, enrichment, reputation, hash lookups, the rule engine, the language model by sequence, the freshness checks, the weekly report and retention. Stages run through the same `main()` the systemd units call wherever no network is involved; the four that call an outside service use their real HTTP clients against a fake transport. It checks the report's numbers against the traffic, that a re-run of ingestion, the rules or the model changes nothing, that sessions sharing a sequence share one model call, that no address or command reaches the page, and that retention removes exactly the year-old session. A second test checks that the migrations and the models describe the same schema: every other database test builds the schema from the models, so a column added to one and not the other would have passed them all.
+- **CI runs the database tests.** A PostgreSQL 16 service, the version the homelab runs, now backs every push, so the 45 database tests, which GitHub had been skipping, run there too.
+
+### Fixed
+
+- **The migrations refused to start when the database URL contained `%`**, which a URL-encoded password does (`p%40ss` for `p@ss`): Alembic's configuration is an INI file, where `%` begins an interpolation. Found by the end-to-end test on its first run.
+
 ## [0.6.0] - 2026-11-08
 
 The reporting release. Behaviours are mapped to MITRE ATT&CK techniques through a hand-written table, checked against a pinned and verifiable copy of release 20.1 rather than against memory; that mattered at once, because release 20 had renamed a tactic and revoked a technique a remembered mapping would have used. Every Monday a one-page report of aggregates describes the week in those terms, and an hourly check on the age of each stage's data sends a phone notification when the pipeline stops, after the rule engine had twice stopped without a single error. The first real report showed what it is for: one address made up about a quarter of the week's sessions, and twelve files were captured for the first time, mostly cryptocurrency miners. The ATT&CK mapping is explained in `docs/attack.md` and the report in `docs/weekly-report.md`.
