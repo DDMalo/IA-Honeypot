@@ -3,6 +3,14 @@
 # Provisioning everything means a Grafana that is lost or rebuilt comes back
 # identical from the repository, and that what the dashboards query is visible
 # in review rather than buried in a container's internal database.
+#
+# Variables are written $NAME, the only forms Grafana expands being $NAME and
+# ${NAME}. There is no default syntax: the url was once written
+# ${POSTGRES_HOST_FOR_GRAFANA:postgres:5432}, which Grafana read as one
+# variable with an odd name, found empty, and so dialled ":5432" — every panel
+# failed with "connection refused". The bare form also matters for the
+# password: ${NAME} is expanded a second time, so a password containing "$"
+# would arrive cut short; $NAME is not.
 
 apiVersion: 1
 
@@ -11,13 +19,13 @@ datasources:
     uid: honeypot-postgres
     type: postgres
     access: proxy
-    url: ${POSTGRES_HOST_FOR_GRAFANA:postgres:5432}
-    user: ${POSTGRES_USER}
-    database: ${POSTGRES_DB}
+    url: $POSTGRES_HOST_FOR_GRAFANA
+    user: $POSTGRES_USER
+    database: $POSTGRES_DB
     isDefault: true
     editable: false
     secureJsonData:
-      password: ${POSTGRES_PASSWORD}
+      password: $POSTGRES_PASSWORD
     jsonData:
       sslmode: disable       # both ends are on the same Docker network
       postgresVersion: 1600
