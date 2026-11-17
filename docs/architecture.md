@@ -5,7 +5,7 @@ IA-Honeypot has two halves that never trust each other the same way. The **senso
 ## Components
 
 ```mermaid
-flowchart LR
+flowchart TB
     A["Attackers<br/>(internet)"] -->|SSH 22 · Telnet 23| B
 
     subgraph SENSOR["Sensor — public VPS (untrusted)"]

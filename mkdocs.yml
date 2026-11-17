@@ -1,0 +1,87 @@
+# The documentation site, built from docs/ and published to GitHub Pages from
+# main by .github/workflows/docs.yml. Every pull request builds it with
+# --strict, so a broken link or a page missing from the navigation fails the
+# check instead of the published site.
+#
+#   pip install -e ".[docs]"
+#   mkdocs serve          # preview at http://127.0.0.1:8000
+#   mkdocs build --strict
+#
+# Material for MkDocs reaches end of life on 5 May 2027. Its successor,
+# Zensical, reads this same file and builds this site cleanly in strict mode,
+# but is at 0.1; moving is one dependency change once it reaches a stable
+# release.
+
+site_name: IA-Honeypot
+site_description: An SSH/Telnet honeypot whose sessions are classified by rules and a language model, measured against hand-labelled data.
+site_author: David Donoso Malo
+site_url: https://ddmalo.github.io/IA-Honeypot/
+repo_url: https://github.com/DDMalo/IA-Honeypot
+repo_name: DDMalo/IA-Honeypot
+edit_uri: edit/develop/docs/
+copyright: Code under the MIT licence. ATT&CK® is © The MITRE Corporation, used under its licence.
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - content.code.copy
+    - search.highlight
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: deep orange
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: deep orange
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+nav:
+  - Home: index.md
+  - Findings:
+      - Attack taxonomy: taxonomy.md
+      - ATT&CK mapping: attack.md
+      - Weekly report: weekly-report.md
+  - Measurements:
+      - Evaluation set: evaluation-set.md
+      - Model comparison: model-comparison.md
+      - Prompt injection: prompt-injection.md
+  - The system:
+      - Architecture: architecture.md
+      - Sensor setup: sensor-setup.md
+      - Homelab setup: homelab-setup.md
+      - Tunnel: tunnel.md
+      - Privacy: privacy.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+validation:
+  nav:
+    omitted_files: warn
+    not_found: warn
+  links:
+    not_found: warn
+    anchors: warn
+    absolute_links: warn
+    unrecognized_links: warn

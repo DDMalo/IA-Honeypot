@@ -2,7 +2,7 @@
 
 These are the labels this project predicts. They were derived from 7,735 real sessions captured by this honeypot in its first week, not chosen from a list of categories that sounded plausible and fitted to the data afterwards. That ordering is the point: categories invented first tend to describe the analyst rather than the attacks.
 
-The code is in [`src/honeypot_ai/classify/taxonomy.py`](../src/honeypot_ai/classify/taxonomy.py), which everything else imports from, so a category cannot drift between the rule engine, the language model, the labelling tool and the evaluation.
+The code is in [`src/honeypot_ai/classify/taxonomy.py`](https://github.com/DDMalo/IA-Honeypot/blob/main/src/honeypot_ai/classify/taxonomy.py), which everything else imports from, so a category cannot drift between the rule engine, the language model, the labelling tool and the evaluation.
 
 ## What the data actually looks like
 

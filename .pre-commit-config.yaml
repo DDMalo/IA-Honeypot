@@ -8,6 +8,9 @@ repos:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
+        # Syntax only, without constructing objects: mkdocs.yml names a Python
+        # function with a !!python/name tag, which a safe loader refuses.
+        args: [--unsafe]
       - id: check-toml
       - id: check-added-large-files
         args: ["--maxkb=1024"]

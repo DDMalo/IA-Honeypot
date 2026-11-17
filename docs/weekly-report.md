@@ -38,7 +38,7 @@ MITRE's copyright notice and licence close every report, because the technique n
 
 ## Where it goes
 
-`cowrie-report.timer` runs on Mondays at 07:10 UTC. By then the night's sessions have been ingested, the rules have run several times since midnight and the language model has had its daily run, so the week is fully labelled. The timer writes the report to `~/honeypot-reports/` on the homelab, outside the clone, and sends the summary to the same ntfy topic as the [freshness checks](../deploy/homelab/README.md#freshness-checks).
+`cowrie-report.timer` runs on Mondays at 07:10 UTC. By then the night's sessions have been ingested, the rules have run several times since midnight and the language model has had its daily run, so the week is fully labelled. The timer writes the report to `~/honeypot-reports/` on the homelab, outside the clone, and sends the summary to the same ntfy topic as the [freshness checks](https://github.com/DDMalo/IA-Honeypot/blob/main/deploy/homelab/README.md#freshness-checks).
 
 The report is **not committed automatically**. It is safe to publish, but which weeks go into the repository is a decision for a person, made after reading it. To publish one, copy it from the homelab, read it, and add it under `reports/` through a pull request like any other change:
 
