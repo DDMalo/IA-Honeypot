@@ -15,6 +15,10 @@ The point is to **measure** which approach works rather than assume it. Three cl
 
 The hosted model wins, and not by luck (exact McNemar test, p = 0.017). The local model that fits this hardware does worse than always guessing the commonest class.
 
+![The Grafana overview for the week to 17 November 2026: 38.3K sessions from 1.91K addresses in 104 countries, sessions over time, and the usernames and passwords tried most](assets/grafana-overview.png)
+
+*The Grafana overview for the week to 17 November 2026. Panels that show addresses or commands are left out of the picture, as they are left out of everything published.*
+
 ## Where to start
 
 **To see what the honeypot found**

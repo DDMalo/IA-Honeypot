@@ -277,7 +277,9 @@ A real shell prints `READY_42`. This one emits a `bash`-shaped error that no `ba
 
 Seven sessions in the corpus used it. All seven know.
 
-That belongs to the emulator rather than to this taxonomy, so it is recorded here and tracked as a sensor issue. Arithmetic expansion now counts as `sandbox_check` — the behaviour already defined as "testing whether the shell is real" — under `shell_probing`, which already covered it.
+That belongs to the emulator rather than to this taxonomy, so it is recorded here and tracked as a sensor issue.
+
+**Fixed since, upstream.** Before the issue reached Cowrie, its maintainer had already added arithmetic expansion, after seeing a bot run the same kind of check (`"$((952*665+17))"`), in Cowrie 3.1.5. Tested against Cowrie's own shell: 3.1.4 answers exactly as above, 3.1.6 prints `READY_42`. The sensor now runs a release with the fix. By 17 November, 89 sessions had sent this probe. Arithmetic expansion now counts as `sandbox_check` — the behaviour already defined as "testing whether the shell is real" — under `shell_probing`, which already covered it.
 
 ### And one genuinely loose wire
 

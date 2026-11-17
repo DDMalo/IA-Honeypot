@@ -3,7 +3,9 @@
 [![CI](https://github.com/DDMalo/IA-Honeypot/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/DDMalo/IA-Honeypot/actions/workflows/ci.yml)
 > SSH/Telnet honeypot with AI-powered attack classification.
 
-**Status:** v0.6.0 — running against live traffic since 30 September 2026. **Over 237,000 real sessions** captured by 8 November, enriched, classified, measured against hand-labelled data, mapped to MITRE ATT&CK and summarised in a weekly report. See the [milestones](../../milestones) for what is next.
+**Status:** v1.0.0 — running against live traffic since 30 September 2026. **287,424 real sessions** from 9,817 addresses in 145 countries by 17 November, enriched, classified, measured against hand-labelled data, mapped to MITRE ATT&CK and summarised in a weekly report.
+
+**Documentation:** <https://ddmalo.github.io/IA-Honeypot/>
 
 ## What is this?
 
@@ -22,14 +24,18 @@ The point of the project is to **measure** which approach works, rather than to 
 
 The hosted model wins, and not by luck (exact McNemar test, p = 0.017); the local model that fits this hardware does worse than guessing. The rules have since been fixed where the set showed them wrong and score 0.76 and 0.71, which is a repair rather than an independent measurement; Gemini still leads (p = 0.047). In production the rules label every session as it arrives and Gemini labels each distinct command sequence once a day. How the set was built, what weakens it — including that the reference labels were adjudicated with a language model's help — and how the ranking was checked against that are in [`docs/evaluation-set.md`](docs/evaluation-set.md) and [`docs/model-comparison.md`](docs/model-comparison.md).
 
+![The Grafana overview for the week to 17 November 2026: 38.3K sessions from 1.91K addresses in 104 countries, sessions over time, and the usernames and passwords tried most](docs/assets/grafana-overview.png)
+
+*The Grafana overview for the week to 17 November 2026. Panels that show addresses or commands are left out of the picture, as they are left out of everything published.*
+
 ## What it has found
 
 The honeypot is not a demo; it is pointed at the internet and the traffic is real. A few things that came out of it:
 
-- **A taxonomy derived from 7,735 real sessions** rather than from a list of plausible categories, with an `other` class that is measured rather than decorative. When it crosses its threshold, the taxonomy is declared wrong, not the session. That has happened three times, and the rules now leave 95 of 237,855 sessions unlabelled — but the number that matters is measured per day, because a campaign is a thing that happens on a date and an average over the corpus hides one.
+- **A taxonomy derived from 7,735 real sessions** rather than from a list of plausible categories, with an `other` class that is measured rather than decorative. When it crosses its threshold, the taxonomy is declared wrong, not the session. That has happened three times, and the rules now leave 159 of 287,424 sessions as `other` — but the number that matters is measured per day, because a campaign is a thing that happens on a date and an average over the corpus hides one.
 - **Attackers check whether they are in a honeypot.** `mount`, `env`, `ls /proc/self`, `history` — reconnaissance of the shell rather than of the host. Somebody built the expectation of honeypots into their tooling.
 - **A campaign of 2,555 sessions in a single day**, each one command: `echo -e "\x6F\x6B"`, a shell-liveness probe written in hex so a honeypot cannot cheat by recognising `ok`. It exposed both a rule that missed by one character of regex and a way of measuring that hid a one-day spike inside a three-week average.
-- **This sensor fails one of those probes.** `echo READY_$((41+1))` returns a `bash`-shaped error where a real shell prints `READY_42`. Seven sessions in the corpus used it; all seven know.
+- **This sensor failed one of those probes, until Cowrie fixed it.** `echo READY_$((41+1))` returned a `bash`-shaped error where a real shell prints `READY_42`, so every bot that asked knew. It was written up here as a sensor issue to report upstream; Cowrie's maintainer had already fixed it, after seeing a bot run the same kind of check, and released it in Cowrie 3.1.5. The sensor now runs a release with the fix. By 17 November, 89 sessions had sent the probe.
 - **Attackers carried their own SSH keys to fetch the payload.** Sessions wrote an OpenSSH private key to disk — two different keys turned up — and used it to pull the next stage over `scp` from one server, which 97 sessions from 54 different addresses were told to fetch from between 3 October and 1 November. The server was reported to its hosting provider; the keys were never used and are not published.
 - **The evaluation set nearly published that malware itself.** The first export of the labelled sample contained both private keys and a 64-bit ELF delivered through a base64 heredoc, all of it split one line per command and so under every threshold the anonymiser had. Reviewing the real export with a script before committing it is what caught it, twice; export now runs the rule engine on every item before and after anonymising and refuses to write a file whose meaning changed.
 - **One address made up about a quarter of a week's traffic.** In the week of 2 November a single address ran the same shell-probing sequence 12,150 times; the sequence had first appeared on 20 October. Most of that week's +572% in `shell_probing` was this one sequence, which is why the weekly report lists the largest campaigns: a jump is traced to its cause before it is read as a trend.
@@ -61,7 +67,10 @@ The homelab always initiates. The sensor holds no credential that reaches into t
 | v0.4.0 | Rule-based and LLM classification | ✅ |
 | v0.5.0 | Evaluation against a hand-labelled dataset | ✅ |
 | v0.6.0 | MITRE ATT&CK mapping and weekly reports | ✅ |
-| v1.0.0 | Stable release and documentation site | |
+| v1.0.0 | Stable release and documentation site | ✅ |
+| v1.1.0 | A web honeypot beside SSH and Telnet | |
+| v1.2.0 | Grouping sessions into campaigns | |
+| v1.3.0 | Sharing indicators as STIX and through MISP | |
 
 ## Security considerations
 
@@ -76,9 +85,18 @@ pip install -e ".[dev]"
 pytest
 ```
 
-Deployment is not required to run the tests: no sensor, no database, no API key. The database tests are skipped unless `TEST_DATABASE_URL` points at a PostgreSQL server.
+Deployment is not required to run the tests: no sensor, no database, no API key. The database tests, including an end-to-end run of the whole pipeline from a Cowrie log to the weekly report, are skipped unless `TEST_DATABASE_URL` points at a PostgreSQL server; CI runs them against PostgreSQL 16 on every push.
+
+To preview the documentation site:
+
+```bash
+pip install -e ".[docs]"
+mkdocs serve                     # http://127.0.0.1:8000
+```
 
 ## Documentation
+
+Everything below is also published as a site: <https://ddmalo.github.io/IA-Honeypot/>.
 
 **The findings**
 
