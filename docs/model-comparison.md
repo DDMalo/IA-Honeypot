@@ -6,7 +6,7 @@ The short answer to both is the same — the hosted model, and the local one is 
 
 ## The evaluation (v0.5.0)
 
-How the 140 sequences were chosen and labelled, and everything that can go wrong with that, is in [`evaluation-set.md`](evaluation-set.md). The full report, generated from the committed predictions, is [`eval/results.md`](../eval/results.md).
+How the 140 sequences were chosen and labelled, and everything that can go wrong with that, is in [`evaluation-set.md`](evaluation-set.md). The full report, generated from the committed predictions, is [`eval/results.md`](https://github.com/DDMalo/IA-Honeypot/blob/main/eval/results.md).
 
 | Classifier | Accuracy | Macro-F1 | Accuracy, uniform part | Accuracy by session | Median latency |
 |---|---:|---:|---:|---:|---:|
@@ -114,4 +114,4 @@ python -m honeypot_ai.classify.llm --provider ollama --sample 3 --seed 1
 OLLAMA_MODEL=llama3.2:3b python -m honeypot_ai.classify.llm --provider ollama --sample 3 --seed 1
 ```
 
-Deployment notes, including how to start Ollama and which model sizes fit, are in [`deploy/homelab/README.md`](../deploy/homelab/README.md).
+Deployment notes, including how to start Ollama and which model sizes fit, are in [`deploy/homelab/README.md`](https://github.com/DDMalo/IA-Honeypot/blob/main/deploy/homelab/README.md).
